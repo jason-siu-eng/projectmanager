@@ -1,4 +1,13 @@
 import os
+
+cred_json = os.getenv("GOOGLE_CRED_JSON")
+if cred_json:
+    with open("credentials.json","w") as f:
+        # if you stored raw JSON, just dump it
+        f.write(cred_json)
+    # now from_client_secrets_file("credentials.json", …) will just work
+
+    
 import json
 from datetime import datetime
 from flask import Flask, request, jsonify, redirect, session, url_for, send_from_directory
