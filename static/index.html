@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Task Scheduler</title>
+  <link
+    href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css"
+    rel="stylesheet"
+  />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .container { max-width: 900px; margin: auto; }
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; margin-bottom: .25rem; }
+    input, select, button { width: 100%; padding: .5rem; font-size: 1rem; }
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .header h1 { margin: 0; font-size: 1.5rem; }
+    .header .sync {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    #syncBtn { background: none; border: none; padding: 0; cursor: pointer; }
+    #syncStatus { font-size: .9rem; color: #555; }
+
+    #outline { margin-top: 2rem; }
+    #addCalendarBtn {
+      display: none;           /* hidden until tasks generated */
+      margin-top: 1rem;
+      padding: .5rem 1rem;
+      font-size: 1rem;
+      background: #28a745;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    #addCalendarBtn:hover { background: #218838; }
+
+    #calendar { margin-top: 2rem; }
+
+    /* FullCalendar button sizing */
+    .fc .fc-button {
+      font-size: 0.8rem;
+      padding: 0.25rem 0.5rem;
+      height: 28px;
+      line-height: 1;
+    }
+    .fc .fc-prev-button,
+    .fc .fc-next-button {
+      width: 32px;
+      padding: 0;
+    }
+    .fc .fc-button-group { gap: 4px; }
+
+    /* Force no wrap */
+    .fc-header-toolbar {
+      flex-wrap: nowrap !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Task Scheduler</h1>
+      <div class="sync">
+        <button id="syncBtn" title="Sync Google">
+          <img
+            src="https://developers.google.com/identity/images/g-logo.png"
+            alt="Sync"
+            style="height:24px;"
+          />
+        </button>
+        <span id="syncStatus">Not synced</span>
+      </div>
+    </div>
+
+    <form id="goalForm">
+      <div class="form-group">
+        <label for="goalInput">What is your goal?</label>
+        <input type="text" id="goalInput" required/>
+      </div>
+      <div class="form-group">
+        <label for="levelSelect">Proficiency level</label>
+        <select id="levelSelect">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="deadlineInput">Deadline (YYYY-MM-DD)</label>
+        <input type="date" id="deadlineInput" required/>
+      </div>
+      <button type="submit">Generate Tasks</button>
+    </form>
+
+    <div id="outline"></div>
+    <button id="addCalendarBtn">Add to Calendar</button>
+    <div id="calendar"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const form         = document.getElementById('goalForm');
+      const outlineDiv   = document.getElementById('outline');
+      const syncBtn      = document.getElementById('syncBtn');
+      const syncStatus   = document.getElementById('syncStatus');
+      const addBtn       = document.getElementById('addCalendarBtn');
+      let lastTasks      = [];
+      let lastDeadline   = '';
+
+      // Initialize FullCalendar
+      const calendarEl = document.getElementById('calendar');
+      const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridWeek',
+        headerToolbar: {
+          left: 'prev,today,next',
+          center: 'title',
+          right: 'dayGridWeek,dayGridDay'
+        },
+        editable: false,
+        selectable: false
+      });
+      calendar.render();
+
+      // Sync or Login
+      async function syncGoogleEvents() {
+        syncStatus.textContent = 'Syncing…';
+        try {
+          const resp = await fetch('/api/events', { credentials: 'include' });
+          if (resp.status === 401) {
+            // not authenticated
+            window.location.href = '/login';
+            return;
+          }
+          const { events } = await resp.json();
+          calendar.removeAllEvents();
+          calendar.addEventSource(events);
+          syncStatus.textContent = 'Synced';
+        } catch (err) {
+          console.error('Sync error', err);
+          syncStatus.textContent = 'Sync failed';
+        }
+      }
+      syncBtn.addEventListener('click', syncGoogleEvents);
+
+      // Generate Tasks
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        outlineDiv.innerHTML = '<p>Loading tasks…</p>';
+        addBtn.style.display = 'none';
+
+        const goal     = document.getElementById('goalInput').value;
+        const level    = document.getElementById('levelSelect').value;
+        const deadline = document.getElementById('deadlineInput').value;
+        lastDeadline = deadline;
+
+        const resp = await fetch('/api/tasks', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ goal, level, deadline })
+        });
+        const { tasks } = await resp.json();
+        lastTasks = tasks || [];
+
+        // Render outline
+        outlineDiv.innerHTML = '<h2>Task Outline</h2>';
+        const ol = document.createElement('ol');
+        lastTasks.forEach(t => {
+          const li = document.createElement('li');
+          li.textContent = t.task;
+          ol.appendChild(li);
+        });
+        outlineDiv.appendChild(ol);
+        addBtn.style.display = 'block';
+      });
+
+      // Add to Calendar
+// inside your DOMContentLoaded …
+addBtn.addEventListener('click', async () => {
+  addBtn.disabled = true;
+  addBtn.textContent = 'Adding…';
+
+  const resp = await fetch('/api/schedule', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tasks: lastTasks,
+      start_date: new Date().toISOString(),
+      deadline: lastDeadline
+    })
+  });
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    alert("Error scheduling tasks: " + (data.details||data.error));
+  } else {
+    // 1) Notify about any unscheduled
+    if (data.unscheduled && data.unscheduled.length) {
+      const lines = data.unscheduled.map(u =>
+        `Could not schedule task #${u.id}: ${u.task}`
+      );
+      alert(lines.join("\n"));
+    }
+    // 2) Refresh calendar
+    await syncGoogleEvents();
+  }
+
+  addBtn.textContent = 'Done!';
+  setTimeout(() => {
+    addBtn.style.display = 'none';
+    addBtn.disabled = false;
+    addBtn.textContent = 'Add to Calendar';
+  }, 1500);
+});
+
+    });
+  </script>
+</body>
+</html>
