@@ -1,14 +1,14 @@
 import os
+import json
+from google_auth_oauthlib.flow import Flow
 
 cred_json = os.getenv("GOOGLE_CRED_JSON")
-if cred_json:
-    with open("credentials.json","w") as f:
-        # if you stored raw JSON, just dump it
-        f.write(cred_json)
-    # now from_client_secrets_file("credentials.json", …) will just work
+if not cred_json:
+    raise RuntimeError("GOOGLE_CRED_JSON env var is missing")
 
-    
-import json
+parsed_creds = json.loads(cred_json)
+flow = Flow.from_client_config(parsed_creds, scopes=SCOPES)
+
 from datetime import datetime
 from flask import Flask, request, jsonify, redirect, session, url_for, send_from_directory
 from flask_cors import CORS
@@ -88,12 +88,15 @@ def index():
 # 2. OAuth login start
 @app.route("/login")
 def login():
-    session.clear()  # drop old creds & scopes
-    flow = InstalledAppFlow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE, scopes=SCOPES
-    )
+    session.clear()
+    cred_json = os.getenv("GOOGLE_CRED_JSON")
+    if not cred_json:
+        return "Missing GOOGLE_CRED_JSON", 500
+
+    parsed_creds = json.loads(cred_json)
+    flow = InstalledAppFlow.from_client_config(parsed_creds, scopes=SCOPES)
     creds = flow.run_local_server(port=0)
-    print("🔑 Granted scopes:", creds.scopes)      # << debug print
+
     session["credentials"] = {
         "token": creds.token,
         "refresh_token": creds.refresh_token,
@@ -103,7 +106,6 @@ def login():
         "scopes": creds.scopes,
     }
     return redirect(url_for("index"))
-
 
 # 4. Return timed events (no all-day)
 @app.route("/api/events")
