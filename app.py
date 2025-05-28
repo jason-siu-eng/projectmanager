@@ -88,15 +88,35 @@ def index():
 @app.route("/login")
 def login():
     session.clear()
-
     cred_json = os.getenv("GOOGLE_CRED_JSON")
     if not cred_json:
         return "Missing GOOGLE_CRED_JSON", 500
 
     parsed_creds = json.loads(cred_json)
-    flow = InstalledAppFlow.from_client_config(parsed_creds, scopes=SCOPES)
-    creds = flow.run_local_server(port=0)
+    flow = Flow.from_client_config(
+        parsed_creds,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI  # must be set correctly
+    )
 
+    auth_url, _ = flow.authorization_url(prompt='consent')
+    session["flow"] = flow.credentials_to_dict()
+    return redirect(auth_url)
+
+@app.route("/oauth2callback")
+def oauth2callback():
+    cred_json = os.getenv("GOOGLE_CRED_JSON")
+    parsed_creds = json.loads(cred_json)
+
+    flow = Flow.from_client_config(
+        parsed_creds,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+
+    flow.fetch_token(authorization_response=request.url)
+
+    creds = flow.credentials
     session["credentials"] = {
         "token": creds.token,
         "refresh_token": creds.refresh_token,
