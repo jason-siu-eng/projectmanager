@@ -2,12 +2,15 @@ import os
 import json
 from google_auth_oauthlib.flow import Flow
 
+# OAuth settings
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
+CLIENT_SECRETS_FILE = "credentials.json"
+
 cred_json = os.getenv("GOOGLE_CRED_JSON")
 if not cred_json:
     raise RuntimeError("GOOGLE_CRED_JSON env var is missing")
 
 parsed_creds = json.loads(cred_json)
-flow = Flow.from_client_config(parsed_creds, scopes=SCOPES)
 
 from datetime import datetime
 from flask import Flask, request, jsonify, redirect, session, url_for, send_from_directory
@@ -35,10 +38,6 @@ if not OPENAI_API_KEY or not FLASK_SECRET_KEY:
 app = Flask(__name__, static_folder="static")
 app.secret_key = FLASK_SECRET_KEY
 CORS(app)
-
-# OAuth settings
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
-CLIENT_SECRETS_FILE = "credentials.json"
 
 # Project logic imports
 from task_breakdown import breakdown_goal
@@ -89,6 +88,7 @@ def index():
 @app.route("/login")
 def login():
     session.clear()
+
     cred_json = os.getenv("GOOGLE_CRED_JSON")
     if not cred_json:
         return "Missing GOOGLE_CRED_JSON", 500
