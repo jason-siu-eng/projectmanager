@@ -14,7 +14,7 @@ from google.auth.exceptions import RefreshError
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
-REDIRECT_URI = os.getenv("REDIRECT_URI")
+REDIRECT_URI = os.getenv("REDIRECT_URI", "").strip()
 GOOGLE_CRED_JSON = os.getenv("GOOGLE_CRED_JSON")
 
 # Ensure required environment variables are set
