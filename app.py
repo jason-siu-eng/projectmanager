@@ -23,8 +23,7 @@ if not GOOGLE_CRED_JSON:
 if not OPENAI_API_KEY or not FLASK_SECRET_KEY:
     raise RuntimeError("Set OPENAI_API_KEY and FLASK_SECRET_KEY in environment")
 
-# Parse Google credentials
-parsed_creds = json.loads(GOOGLE_CRED_JSON)
+# Parse Google credentials\parsed_creds = json.loads(GOOGLE_CRED_JSON)
 
 # OAuth settings
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -88,11 +87,10 @@ def login():
             scopes=SCOPES,
             redirect_uri=REDIRECT_URI
         )
-        auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
-        flow_state = flow.oauth2session.state
-        print("🔎 Flow state type:", type(flow_state))
-        if callable(flow_state):
-            raise RuntimeError("OAuth state is unexpectedly a function.")
+        # Generate authorization URL and capture state
+        auth_url, flow_state = flow.authorization_url(prompt='consent', access_type='offline')
+        print("🔎 OAuth State:", flow_state)
+
         session["state"] = flow_state
         print("✅ Redirecting to auth URL:", auth_url)
         return redirect(auth_url)
@@ -106,6 +104,7 @@ def oauth2callback():
         print("🟡 /oauth2callback hit")
         session_state = session.get("state")
         print("🔁 session_state:", session_state)
+
         flow = InstalledAppFlow.from_client_config(
             parsed_creds,
             scopes=SCOPES,
