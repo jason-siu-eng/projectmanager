@@ -36,7 +36,7 @@ if not OPENAI_API_KEY or not FLASK_SECRET_KEY:
 
 # Flask setup
 app = Flask(__name__, static_folder="static")
-app.secret_key = FLASK_SECRET_KEY
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
 CORS(app)
 
 # Project logic imports
