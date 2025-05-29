@@ -88,6 +88,7 @@ def index():
 @app.route("/login")
 def login():
     session.clear()
+
     cred_json = os.getenv("GOOGLE_CRED_JSON")
     if not cred_json:
         return "Missing GOOGLE_CRED_JSON", 500
@@ -96,45 +97,38 @@ def login():
     flow = Flow.from_client_config(
         parsed_creds,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI  # must be set correctly
+        redirect_uri=REDIRECT_URI
     )
 
     auth_url, _ = flow.authorization_url(prompt='consent')
-    session["flow"] = flow.credentials_to_dict()
+    session["state"] = flow.oauth2session.state  # ✅ FIXED
     return redirect(auth_url)
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    try:
-        cred_json = os.getenv("GOOGLE_CRED_JSON")
-        if not cred_json:
-            app.logger.error("Missing GOOGLE_CRED_JSON environment variable.")
-            return "Missing credentials", 500
+    cred_json = os.getenv("GOOGLE_CRED_JSON")
+    parsed_creds = json.loads(cred_json)
 
-        parsed_creds = json.loads(cred_json)
-        flow = Flow.from_client_config(
-            parsed_creds,
-            scopes=SCOPES,
-            redirect_uri=REDIRECT_URI
-        )
+    flow = Flow.from_client_config(
+        parsed_creds,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI,
+        state=session.get("state")  # ✅ use stored state
+    )
 
-        # Fetch token using full request URL
-        flow.fetch_token(authorization_response=request.url)
+    flow.fetch_token(authorization_response=request.url)
 
-        creds = flow.credentials
-        session["credentials"] = {
-            "token": creds.token,
-            "refresh_token": creds.refresh_token,
-            "token_uri": creds.token_uri,
-            "client_id": creds.client_id,
-            "client_secret": creds.client_secret,
-            "scopes": creds.scopes,
-        }
+    creds = flow.credentials
+    session["credentials"] = {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": creds.scopes,
+    }
 
-        return redirect(url_for("index"))
-    except Exception as e:
-        app.logger.exception("OAuth callback failed")
-        return f"OAuth failed: {str(e)}", 500
+    return redirect(url_for("index"))
 
 # 4. Return timed events (no all-day)
 @app.route("/api/events")
