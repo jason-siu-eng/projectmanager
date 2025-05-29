@@ -1,6 +1,5 @@
 import os
 import json
-from google_auth_oauthlib.flow import Flow
 
 # OAuth settings
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -106,10 +105,13 @@ def login():
 
         parsed_creds = json.loads(cred_json)
 
+
+        from google_auth_oauthlib.flow import Flow  # ✅ safe scoped import
+
         flow = Flow.from_client_config(
             parsed_creds,
             scopes=SCOPES,
-            redirect_uri=redirect_uri
+             redirect_uri=redirect_uri
         )
 
         auth_url, _ = flow.authorization_url(prompt='consent')
