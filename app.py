@@ -113,7 +113,9 @@ def login():
         )
 
         auth_url, _ = flow.authorization_url(prompt='consent')
-        session["state"] = flow.oauth2session.state
+        state = flow.oauth2session.state
+        print("🔎 Flow state type:", type(state))
+        session["state"] = str(state)
 
         print("✅ Redirecting to auth URL:", auth_url)
         return redirect(auth_url)
