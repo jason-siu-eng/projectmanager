@@ -23,7 +23,8 @@ if not GOOGLE_CRED_JSON:
 if not OPENAI_API_KEY or not FLASK_SECRET_KEY:
     raise RuntimeError("Set OPENAI_API_KEY and FLASK_SECRET_KEY in environment")
 
-# Parse Google credentials\parsed_creds = json.loads(GOOGLE_CRED_JSON)
+# Parse Google credentials
+parsed_creds = json.loads(GOOGLE_CRED_JSON)
 
 # OAuth settings
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
