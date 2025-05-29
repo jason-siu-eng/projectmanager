@@ -95,7 +95,7 @@ def login():
         cred_json = os.getenv("GOOGLE_CRED_JSON")
         redirect_uri = os.getenv("REDIRECT_URI")
 
-        print("🔐 REDIRECT_URI =", redirect_uri)  # 🔍 Add this
+        print("🔐 REDIRECT_URI =", redirect_uri)
 
         if not cred_json:
             print("❌ Missing GOOGLE_CRED_JSON")
@@ -113,9 +113,14 @@ def login():
         )
 
         auth_url, _ = flow.authorization_url(prompt='consent')
-        state = flow.oauth2session.state
-        print("🔎 Flow state type:", type(state))
-        session["state"] = str(state)
+
+        flow_state = flow.oauth2session.state
+        print("🔎 Flow state type:", type(flow_state))
+
+        if callable(flow_state):
+            raise RuntimeError("OAuth state is a function — possible naming conflict or import issue.")
+
+        session["state"] = str(flow_state)
 
         print("✅ Redirecting to auth URL:", auth_url)
         return redirect(auth_url)
@@ -123,9 +128,7 @@ def login():
     except Exception as e:
         print("🔥 Error in /login:", repr(e))
         return f"Login failed: {e}", 500
-
-
-
+    
 @app.route("/oauth2callback")
 def oauth2callback():
     cred_json = os.getenv("GOOGLE_CRED_JSON")
