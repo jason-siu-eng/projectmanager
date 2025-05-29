@@ -88,30 +88,40 @@ def index():
 @app.route("/login")
 def login():
     try:
+        print("🟡 /login hit")
+
         session.clear()
 
         cred_json = os.getenv("GOOGLE_CRED_JSON")
+        redirect_uri = os.getenv("REDIRECT_URI")
+
+        print("🔐 REDIRECT_URI =", redirect_uri)  # 🔍 Add this
+
         if not cred_json:
             print("❌ Missing GOOGLE_CRED_JSON")
             return "Missing GOOGLE_CRED_JSON", 500
+        if not redirect_uri:
+            print("❌ Missing REDIRECT_URI")
+            return "Missing REDIRECT_URI", 500
 
         parsed_creds = json.loads(cred_json)
 
         flow = Flow.from_client_config(
             parsed_creds,
             scopes=SCOPES,
-            redirect_uri=REDIRECT_URI
+            redirect_uri=redirect_uri
         )
 
         auth_url, _ = flow.authorization_url(prompt='consent')
         session["state"] = flow.oauth2session.state
 
-        print("✅ Redirecting to Google auth:", auth_url)
+        print("✅ Redirecting to auth URL:", auth_url)
         return redirect(auth_url)
 
     except Exception as e:
-        print("🔥 Error in /login route:", repr(e))
+        print("🔥 Error in /login:", repr(e))
         return f"Login failed: {e}", 500
+
 
 
 @app.route("/oauth2callback")
