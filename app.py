@@ -105,27 +105,36 @@ def login():
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    cred_json = os.getenv("GOOGLE_CRED_JSON")
-    parsed_creds = json.loads(cred_json)
+    try:
+        cred_json = os.getenv("GOOGLE_CRED_JSON")
+        if not cred_json:
+            app.logger.error("Missing GOOGLE_CRED_JSON environment variable.")
+            return "Missing credentials", 500
 
-    flow = Flow.from_client_config(
-        parsed_creds,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
+        parsed_creds = json.loads(cred_json)
+        flow = Flow.from_client_config(
+            parsed_creds,
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI
+        )
 
-    flow.fetch_token(authorization_response=request.url)
+        # Fetch token using full request URL
+        flow.fetch_token(authorization_response=request.url)
 
-    creds = flow.credentials
-    session["credentials"] = {
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": creds.scopes,
-    }
-    return redirect(url_for("index"))
+        creds = flow.credentials
+        session["credentials"] = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": creds.scopes,
+        }
+
+        return redirect(url_for("index"))
+    except Exception as e:
+        app.logger.exception("OAuth callback failed")
+        return f"OAuth failed: {str(e)}", 500
 
 # 4. Return timed events (no all-day)
 @app.route("/api/events")
