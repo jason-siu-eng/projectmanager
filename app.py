@@ -10,35 +10,53 @@ from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
 
-# Load environment variables
+# ─── Load environment variables ───────────────────────────────────────────────
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
-REDIRECT_URI = os.getenv("REDIRECT_URI", "").strip()
+REDIRECT_URI     = os.getenv("REDIRECT_URI", "").strip()
 GOOGLE_CRED_JSON = os.getenv("GOOGLE_CRED_JSON")
 
-# Ensure required environment variables are set
-if not GOOGLE_CRED_JSON:
-    raise RuntimeError("GOOGLE_CRED_JSON env var is missing")
+# ─── Parse Google credentials: prefer env var, fallback to local file ─────────
+if GOOGLE_CRED_JSON:
+    try:
+        parsed_creds = json.loads(GOOGLE_CRED_JSON)
+    except json.JSONDecodeError:
+        raise RuntimeError("Invalid JSON in GOOGLE_CRED_JSON env var")
+elif os.path.exists("credentials.json"):
+    with open("credentials.json", "r") as f:
+        parsed_creds = json.load(f)
+else:
+    raise RuntimeError(
+        "Missing Google credentials: set GOOGLE_CRED_JSON or provide credentials.json locally"
+    )
+
+# ─── Ensure required environment variables ────────────────────────────────────
 if not OPENAI_API_KEY or not FLASK_SECRET_KEY:
     raise RuntimeError("Set OPENAI_API_KEY and FLASK_SECRET_KEY in environment")
+if not REDIRECT_URI:
+    raise RuntimeError("Set REDIRECT_URI in environment to your OAuth callback URL")
 
-# Parse Google credentials
-parsed_creds = json.loads(GOOGLE_CRED_JSON)
-
-# OAuth settings
+# ─── OAuth settings ───────────────────────────────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
-# Flask setup
+# ─── Flask setup ─────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder="static")
 app.secret_key = FLASK_SECRET_KEY
-CORS(app)
+# Enable CORS with cookie‐based sessions
+CORS(app, supports_credentials=True)
 
-# Import project logic
+
+# ─── Project logic imports ───────────────────────────────────────────────────
 from task_breakdown import breakdown_goal
 from calendar_integration import schedule_tasks, create_calendar_events
 
+
 def get_calendar_service():
+    """
+    If the user has stored credentials in session, reconstruct the Credentials object.
+    Attempt a refresh if expired; otherwise, return None to indicate “not authenticated.”
+    """
     creds_info = session.get("credentials")
     if not creds_info:
         return None
@@ -55,6 +73,7 @@ def get_calendar_service():
     try:
         if not creds.valid:
             creds.refresh(Request())
+        # Save any updated token back into session
         session["credentials"] = {
             "token": creds.token,
             "refresh_token": creds.refresh_token,
@@ -69,48 +88,55 @@ def get_calendar_service():
 
     return build("calendar", "v3", credentials=creds)
 
+
 @app.route("/")
 def index():
+    """
+    Serve the React/HTML front end from the 'static' folder.
+    """
     return send_from_directory(app.static_folder, "index.html")
+
 
 @app.route("/login")
 def login():
+    """
+    Step 1 of OAuth: clear any old session, build a new InstalledAppFlow,
+    and redirect the user to Google's consent screen.
+    """
     try:
-        print("🟡 /login hit")
         session.clear()
-
-        if not REDIRECT_URI:
-            print("❌ Missing REDIRECT_URI")
-            return "Missing REDIRECT_URI", 500
-
         flow = InstalledAppFlow.from_client_config(
             parsed_creds,
             scopes=SCOPES,
             redirect_uri=REDIRECT_URI
         )
-        # Generate authorization URL and capture state
-        auth_url, flow_state = flow.authorization_url(prompt='consent', access_type='offline')
-        print("🔎 OAuth State:", flow_state)
-
-        session["state"] = flow_state
-        print("✅ Redirecting to auth URL:", auth_url)
+        auth_url, state = flow.authorization_url(
+            prompt="consent",
+            access_type="offline"
+        )
+        session["state"] = state
         return redirect(auth_url)
     except Exception as e:
-        print("🔥 Error in /login:", repr(e))
-        return f"Login failed: {e}", 500
+        app.logger.exception("Error in /login route")
+        return jsonify({"error": "login_failed", "message": str(e)}), 500
+
 
 @app.route("/oauth2callback")
 def oauth2callback():
+    """
+    Step 2 of OAuth: Google calls us back here with ?code=…&state=….
+    Verify state, fetch the token, and store credentials in session.
+    """
     try:
-        print("🟡 /oauth2callback hit")
-        session_state = session.get("state")
-        print("🔁 session_state:", session_state)
+        state = session.pop("state", None)
+        if not state:
+            return jsonify({"error": "invalid_state"}), 400
 
         flow = InstalledAppFlow.from_client_config(
             parsed_creds,
             scopes=SCOPES,
             redirect_uri=REDIRECT_URI,
-            state=session_state
+            state=state
         )
         flow.fetch_token(authorization_response=request.url)
         creds = flow.credentials
@@ -122,17 +148,22 @@ def oauth2callback():
             "client_secret": creds.client_secret,
             "scopes": creds.scopes,
         }
-        print("✅ OAuth2 callback complete")
         return redirect(url_for("index"))
     except Exception as e:
-        print("🔥 Error in /oauth2callback:", repr(e))
-        return f"OAuth callback failed: {e}", 500
+        app.logger.exception("Error in /oauth2callback route")
+        return jsonify({"error": "oauth_callback_failed", "message": str(e)}), 500
+
 
 @app.route("/api/events")
 def api_events():
+    """
+    Return all upcoming (non–all-day) events from the user's primary calendar.
+    If not authenticated, respond with 401.
+    """
     service = get_calendar_service()
     if service is None:
         return jsonify({"error": "not_authenticated"}), 401
+
     try:
         now = datetime.utcnow().isoformat() + "Z"
         items = service.events().list(
@@ -141,31 +172,94 @@ def api_events():
             singleEvents=True,
             orderBy="startTime"
         ).execute().get("items", [])
+        events = []
+        for e in items:
+            start = e["start"].get("dateTime")
+            end   = e["end"].get("dateTime")
+            if start and end:
+                events.append({
+                    "title": e.get("summary", "(No title)"),
+                    "start": start,
+                    "end":   end
+                })
+        return jsonify({"events": events})
     except RefreshError:
         session.clear()
         return jsonify({"error": "not_authenticated"}), 401
-    events = []
-    for e in items:
-        start = e["start"].get("dateTime")
-        end = e["end"].get("dateTime")
-        if start and end:
-            events.append({"title": e.get("summary","(No title)"), "start": start, "end": end})
-    return jsonify({"events": events})
+
 
 @app.route("/api/tasks", methods=["POST"])
 def api_tasks():
+    """
+    Given { goal, level, deadline } in JSON body, use `breakdown_goal`
+    to return an array of tasks (each with at least `task` and `duration_hours`).
+    """
     data = request.get_json(force=True)
-    tasks = breakdown_goal(data.get("goal",""), data.get("level","easy"), data.get("deadline",""))
+    tasks = breakdown_goal(
+        data.get("goal", ""),
+        data.get("level", "easy"),
+        data.get("deadline", "")
+    )
+    # Ensure every task has a duration_hours field
     for t in tasks:
         t.setdefault("duration_hours", 1.0)
     return jsonify({"tasks": tasks})
 
+
 @app.route("/api/schedule", methods=["POST"])
 def api_schedule():
-    data = request.get_json(force=True)
+    """
+    Schedule the tasks in the user's Google Calendar.
+    Expects JSON body:
+    {
+      tasks: [ { id, task, duration_hours }, … ],
+      start_date: <ISO timestamp>,
+      deadline: <"YYYY-MM-DD">,
+      settings: {
+        maxEventsPerDay: <int>,
+        allowedDaysOfWeek: [ "MO","TU",… ],
+        preferredTimeOfDay: "morning"|"noon"|"afternoon"|"night"
+      }
+    }
+    Returns:
+      { eventIds: [<Google event IDs>], unscheduled: [ { id, task }, … ] }
+    """
+    data      = request.get_json(force=True)
+    settings  = data.get("settings", {})
+
+    # Extract user settings (if any)
+    max_per_day     = settings.get("maxEventsPerDay", None)
+    allowed_days    = settings.get("allowedDaysOfWeek", None)
+    preferred_time  = settings.get("preferredTimeOfDay", None)
+
     svc = get_calendar_service()
     if not svc:
-        return jsonify({"error":"not_authenticated"}), 401
-    scheduled, unscheduled = schedule_tasks(svc, data.get("tasks", []), data.get("start_date"), data.get("deadline"))
+        return jsonify({"error": "not_authenticated"}), 401
+
+    tasks      = data.get("tasks", [])
+    start_iso  = data.get("start_date")
+    deadline   = data.get("deadline")
+
+    # Call our schedule_tasks with all three settings parameters
+    scheduled, unscheduled = schedule_tasks(
+        svc,
+        tasks,
+        start_iso,
+        deadline,
+        max_per_day=max_per_day,
+        allowed_days=allowed_days,
+        preferred_time=preferred_time
+    )
+
+    # Insert events into Google Calendar
     ids = create_calendar_events(svc, scheduled)
-    return jsonify({"eventIds": ids, "unscheduled": unscheduled})
+
+    return jsonify({
+       "eventIds":    ids,
+       "unscheduled": unscheduled
+    })
+
+
+if __name__ == "__main__":
+    # Only run the Flask dev server when explicitly invoked
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)

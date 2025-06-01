@@ -4,48 +4,105 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Task Scheduler</title>
+
+  <!-- FullCalendar CSS -->
   <link
     href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css"
     rel="stylesheet"
   />
+
+  <!-- Material Icons for settings gear -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    .container { max-width: 900px; margin: auto; }
-    .form-group { margin-bottom: 1rem; }
-    label { display: block; margin-bottom: .25rem; }
-    input, select, button { width: 100%; padding: .5rem; font-size: 1rem; }
-    /* Header */
+    /* 1. Box-sizing so width:100% includes padding/border */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    /* 2. Center wrapper */
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* 3. Header + controls */
     .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 1rem;
     }
-    .header h1 { margin: 0; font-size: 1.5rem; }
-    .header .sync {
+    .header h1 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+    .header-controls {
       display: flex;
       align-items: center;
-      gap: .5rem;
+      gap: 0.5rem;
     }
-    #syncBtn { background: none; border: none; padding: 0; cursor: pointer; }
-    #syncStatus { font-size: .9rem; color: #555; }
+    #settingsBtn,
+    #syncBtn {
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
+    #settingsBtn .material-icons,
+    #syncBtn img {
+      width: 24px;
+      height: 24px;
+    }
+    #syncStatus {
+      font-size: 0.9rem;
+      color: #555;
+    }
 
-    #outline { margin-top: 2rem; }
+    /* 4. Form controls */
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    input, select, button[type="submit"] {
+      display: block;
+      width: 100%;
+      padding: 0.5rem;
+      font-size: 1rem;
+    }
+
+    /* 5. Task outline & Add-to-calendar button */
+    #outline {
+      margin-top: 2rem;
+    }
     #addCalendarBtn {
-      display: none;           /* hidden until tasks generated */
+      display: none;
       margin-top: 1rem;
-      padding: .5rem 1rem;
+      padding: 0.5rem 1rem;
       font-size: 1rem;
       background: #28a745;
       color: white;
       border: none;
       cursor: pointer;
     }
-    #addCalendarBtn:hover { background: #218838; }
+    #addCalendarBtn:hover {
+      background: #218838;
+    }
 
-    #calendar { margin-top: 2rem; }
+    /* 6. Calendar container */
+    #calendar {
+      margin-top: 2rem;
+    }
 
-    /* FullCalendar button sizing */
+    /* 7. FullCalendar button tweaks */
     .fc .fc-button {
       font-size: 0.8rem;
       padding: 0.25rem 0.5rem;
@@ -57,11 +114,67 @@
       width: 32px;
       padding: 0;
     }
-    .fc .fc-button-group { gap: 4px; }
-
-    /* Force no wrap */
+    .fc .fc-button-group {
+      gap: 4px;
+    }
     .fc-header-toolbar {
       flex-wrap: nowrap !important;
+    }
+
+    /* 8. Settings modal overlay (transparent so page shows through) */
+    #settingsModal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: transparent; /* fully transparent overlay */
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;            /* sit above everything */
+    }
+
+    /* 9. Settings modal content (white box) */
+    #settingsModal .modal-content {
+  background: #ffffff;        /* keep the white background */
+  padding: 1rem;
+  border-radius: 8px;
+  max-width: 700px;
+  width: 90%;
+  position: relative;
+
+  /* ✱ Add one of these to create a distinct outline ✱ */
+
+  /* Option A: a solid border */
+  border: 2px solid #333333;        /* dark gray border */
+
+  /* Option B: or, if you prefer a colored accent, e.g. blue: */
+  /* border: 2px solid #007BFF;     color-accented border */
+
+  /* Keep your box‐shadow for extra “lift” */
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+
+    #settingsModal .close {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.75rem;
+      font-size: 1.5rem;
+      cursor: pointer;
+    }
+
+    /* 10. Seven-day checkboxes in a single row */
+    #settingsModal .form-group.days {
+      display: flex;
+      flex-wrap: nowrap;       /* force one line */
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    #settingsModal .form-group.days label {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-bottom: 0;
     }
   </style>
 </head>
@@ -69,15 +182,21 @@
   <div class="container">
     <div class="header">
       <h1>Task Scheduler</h1>
-      <div class="sync">
-        <button id="syncBtn" title="Sync Google">
-          <img
-            src="https://developers.google.com/identity/images/g-logo.png"
-            alt="Sync"
-            style="height:24px;"
-          />
+      <div class="header-controls">
+        <!-- Settings gear -->
+        <button id="settingsBtn" title="Settings">
+          <span class="material-icons">settings</span>
         </button>
-        <span id="syncStatus">Not synced</span>
+        <!-- Google Sync -->
+        <div class="sync">
+          <button id="syncBtn" title="Sync Google">
+            <img
+              src="https://developers.google.com/identity/images/g-logo.png"
+              alt="Sync"
+            />
+          </button>
+          <span id="syncStatus">Not synced</span>
+        </div>
       </div>
     </div>
 
@@ -106,18 +225,50 @@
     <div id="calendar"></div>
   </div>
 
+  <!-- Settings Modal -->
+  <div id="settingsModal">
+    <div class="modal-content">
+      <span class="close" id="closeSettings">&times;</span>
+      <h2>Settings</h2>
+
+      <!-- Max events per day -->
+      <div class="form-group">
+        <label for="maxEventsPerDay">Max events/day</label>
+        <input type="number" id="maxEventsPerDay" min="1" value="3"/>
+      </div>
+
+      <!-- Allowed days of week -->
+      <div class="form-group days">
+        <label><input type="checkbox" value="MO" checked/> Mon</label>
+        <label><input type="checkbox" value="TU" checked/> Tue</label>
+        <label><input type="checkbox" value="WE" checked/> Wed</label>
+        <label><input type="checkbox" value="TH" checked/> Thu</label>
+        <label><input type="checkbox" value="FR" checked/> Fri</label>
+        <label><input type="checkbox" value="SA"/> Sat</label>
+        <label><input type="checkbox" value="SU"/> Sun</label>
+      </div>
+
+      <!-- Preferred time of day dropdown -->
+      <div class="form-group">
+        <label for="preferredTime">Preferred time of day</label>
+        <select id="preferredTime">
+          <option value="morning">Morning (8 AM–12 PM)</option>
+          <option value="noon">Noon (12 PM–2 PM)</option>
+          <option value="afternoon">Afternoon (2 PM–6 PM)</option>
+          <option value="night">Night (6 PM–10 PM)</option>
+        </select>
+      </div>
+
+      <button id="saveSettings">Save</button>
+    </div>
+  </div>
+
+  <!-- FullCalendar JS -->
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      const form         = document.getElementById('goalForm');
-      const outlineDiv   = document.getElementById('outline');
-      const syncBtn      = document.getElementById('syncBtn');
-      const syncStatus   = document.getElementById('syncStatus');
-      const addBtn       = document.getElementById('addCalendarBtn');
-      let lastTasks      = [];
-      let lastDeadline   = '';
-
-      // Initialize FullCalendar
+      // ─── FullCalendar initialization ───────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridWeek',
@@ -131,13 +282,14 @@
       });
       calendar.render();
 
-      // Sync or Login
+      // ─── Google Sync ────────────────────────────────
+      const syncBtn    = document.getElementById('syncBtn');
+      const syncStatus = document.getElementById('syncStatus');
       async function syncGoogleEvents() {
         syncStatus.textContent = 'Syncing…';
         try {
           const resp = await fetch('/api/events', { credentials: 'include' });
           if (resp.status === 401) {
-            // not authenticated
             window.location.href = '/login';
             return;
           }
@@ -152,7 +304,13 @@
       }
       syncBtn.addEventListener('click', syncGoogleEvents);
 
-      // Generate Tasks
+      // ─── Task Generation ────────────────────────────
+      const form       = document.getElementById('goalForm');
+      const outlineDiv = document.getElementById('outline');
+      const addBtn     = document.getElementById('addCalendarBtn');
+      let lastTasks    = [];
+      let lastDeadline = '';
+
       form.addEventListener('submit', async e => {
         e.preventDefault();
         outlineDiv.innerHTML = '<p>Loading tasks…</p>';
@@ -172,7 +330,6 @@
         const { tasks } = await resp.json();
         lastTasks = tasks || [];
 
-        // Render outline
         outlineDiv.innerHTML = '<h2>Task Outline</h2>';
         const ol = document.createElement('ol');
         lastTasks.forEach(t => {
@@ -184,46 +341,98 @@
         addBtn.style.display = 'block';
       });
 
-      // Add to Calendar
-// inside your DOMContentLoaded …
-addBtn.addEventListener('click', async () => {
-  addBtn.disabled = true;
-  addBtn.textContent = 'Adding…';
+      // ─── Add to Calendar ───────────────────────────
+      addBtn.addEventListener('click', async () => {
+        addBtn.disabled = true;
+        addBtn.textContent = 'Adding…';
 
-  const resp = await fetch('/api/schedule', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tasks: lastTasks,
-      start_date: new Date().toISOString(),
-      deadline: lastDeadline
-    })
-  });
-  const data = await resp.json();
+        // get settings from localStorage
+        const maxPerDay   = parseInt(localStorage.getItem('maxEventsPerDay') || '3', 10);
+        const allowedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
+        const preferredTime = localStorage.getItem('preferredTime') || 'morning';
 
-  if (!resp.ok) {
-    alert("Error scheduling tasks: " + (data.details||data.error));
-  } else {
-    // 1) Notify about any unscheduled
-    if (data.unscheduled && data.unscheduled.length) {
-      const lines = data.unscheduled.map(u =>
-        `Could not schedule task #${u.id}: ${u.task}`
-      );
-      alert(lines.join("\n"));
-    }
-    // 2) Refresh calendar
-    await syncGoogleEvents();
-  }
+        const resp = await fetch('/api/schedule', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tasks: lastTasks,
+            start_date: new Date().toISOString(),
+            deadline: lastDeadline,
+            settings: {
+              maxEventsPerDay: maxPerDay,
+              allowedDaysOfWeek: allowedDays,
+              preferredTimeOfDay: preferredTime
+            }
+          })
+        });
+        const data = await resp.json();
 
-  addBtn.textContent = 'Done!';
-  setTimeout(() => {
-    addBtn.style.display = 'none';
-    addBtn.disabled = false;
-    addBtn.textContent = 'Add to Calendar';
-  }, 1500);
-});
+        if (!resp.ok) {
+          alert("Error scheduling tasks: " + (data.message||data.error));
+        } else {
+          if (data.unscheduled?.length) {
+            alert(
+              data.unscheduled
+                .map(u => `Could not schedule #${u.id}: ${u.task}`)
+                .join("\n")
+            );
+          }
+          await syncGoogleEvents();
+        }
 
+        addBtn.textContent = 'Done!';
+        setTimeout(() => {
+          addBtn.style.display = 'none';
+          addBtn.disabled = false;
+          addBtn.textContent = 'Add to Calendar';
+        }, 1500);
+      });
+
+      // ─── Settings Popup ────────────────────────────
+      const settingsBtn   = document.getElementById('settingsBtn');
+      const settingsModal = document.getElementById('settingsModal');
+      const closeSettings = document.getElementById('closeSettings');
+      const saveSettings  = document.getElementById('saveSettings');
+
+      settingsBtn.addEventListener('click', () => {
+        settingsModal.style.display = 'flex';
+      });
+      closeSettings.addEventListener('click', () => {
+        settingsModal.style.display = 'none';
+      });
+      window.addEventListener('click', e => {
+        if (e.target === settingsModal) settingsModal.style.display = 'none';
+      });
+
+      // Persist settings
+      saveSettings.addEventListener('click', () => {
+        const maxEvt = parseInt(document.getElementById('maxEventsPerDay').value, 10);
+        const days   = Array.from(
+          document.querySelectorAll('#settingsModal .form-group.days input:checked')
+        ).map(cb => cb.value);
+        const pref   = document.getElementById('preferredTime').value;
+
+        localStorage.setItem('maxEventsPerDay', maxEvt);
+        localStorage.setItem('allowedDays', JSON.stringify(days));
+        localStorage.setItem('preferredTime', pref);
+        settingsModal.style.display = 'none';
+      });
+
+      // Load settings into form
+      const storedMax = localStorage.getItem('maxEventsPerDay');
+      if (storedMax) {
+        document.getElementById('maxEventsPerDay').value = storedMax;
+      }
+      const storedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
+      if (storedDays.length) {
+        document.querySelectorAll('#settingsModal .form-group.days input')
+          .forEach(cb => cb.checked = storedDays.includes(cb.value));
+      }
+      const storedTime = localStorage.getItem('preferredTime');
+      if (storedTime) {
+        document.getElementById('preferredTime').value = storedTime;
+      }
     });
   </script>
 </body>
