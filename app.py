@@ -10,14 +10,14 @@ from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
 
-# ─── Load environment variables ───────────────────────────────────────────────
+# Load environment variables
 load_dotenv()
-OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
-REDIRECT_URI     = os.getenv("REDIRECT_URI", "").strip()
+REDIRECT_URI = os.getenv("REDIRECT_URI", "").strip()
 GOOGLE_CRED_JSON = os.getenv("GOOGLE_CRED_JSON")
 
-# ─── Parse Google credentials: prefer env var, fall back to local file ─────────
+# Parse Google credentials: prefer env var, fall back to local file if present
 if GOOGLE_CRED_JSON:
     try:
         parsed_creds = json.loads(GOOGLE_CRED_JSON)
@@ -27,34 +27,28 @@ elif os.path.exists("credentials.json"):
     with open("credentials.json", "r") as f:
         parsed_creds = json.load(f)
 else:
-    raise RuntimeError(
-        "Missing Google credentials: set GOOGLE_CRED_JSON or provide credentials.json locally"
-    )
+    raise RuntimeError("Missing Google credentials: set GOOGLE_CRED_JSON or provide credentials.json file locally")
 
-# ─── Ensure required environment variables ────────────────────────────────────
+# Ensure required environment variables
 if not OPENAI_API_KEY or not FLASK_SECRET_KEY:
     raise RuntimeError("Set OPENAI_API_KEY and FLASK_SECRET_KEY in environment")
 if not REDIRECT_URI:
     raise RuntimeError("Set REDIRECT_URI in environment to your OAuth callback URL")
 
-# ─── OAuth settings ───────────────────────────────────────────────────────────
+# OAuth settings
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
-# ─── Flask setup ─────────────────────────────────────────────────────────────
+# Flask setup
 app = Flask(__name__, static_folder="static")
 app.secret_key = FLASK_SECRET_KEY
 CORS(app, supports_credentials=True)
 
-# ─── Project logic imports ───────────────────────────────────────────────────
+# Import project logic
 from task_breakdown import breakdown_goal
 from calendar_integration import schedule_tasks, create_calendar_events
 
 
 def get_calendar_service():
-    """
-    If the user has stored credentials in session, reconstruct the Credentials object.
-    Attempt a refresh if expired; otherwise return None → not authenticated.
-    """
     creds_info = session.get("credentials")
     if not creds_info:
         return None
@@ -88,18 +82,11 @@ def get_calendar_service():
 
 @app.route("/")
 def index():
-    """
-    Serve index.html from the static folder.
-    """
     return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/login")
 def login():
-    """
-    Step 1 of OAuth: clear any old session, create an InstalledAppFlow,
-    and redirect user to Google’s consent screen.
-    """
     try:
         session.clear()
         flow = InstalledAppFlow.from_client_config(
@@ -120,10 +107,6 @@ def login():
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    """
-    Step 2 of OAuth: Google calls us back here with ?code=…&state=….
-    Verify state, fetch token, store credentials in session, then redirect to index.
-    """
     try:
         state = session.pop("state", None)
         if not state:
@@ -153,31 +136,26 @@ def oauth2callback():
 
 @app.route("/api/events")
 def api_events():
-    """
-    Return all upcoming (non–all-day) events on the user’s primary calendar.
-    If not authenticated, respond with 401.
-    """
     service = get_calendar_service()
     if service is None:
         return jsonify({"error": "not_authenticated"}), 401
-
     try:
         now = datetime.utcnow().isoformat() + "Z"
+        events = []
         items = service.events().list(
             calendarId="primary",
             timeMin=now,
             singleEvents=True,
             orderBy="startTime"
         ).execute().get("items", [])
-        events = []
         for e in items:
             start = e["start"].get("dateTime")
-            end   = e["end"].get("dateTime")
+            end = e["end"].get("dateTime")
             if start and end:
                 events.append({
                     "title": e.get("summary", "(No title)"),
                     "start": start,
-                    "end":   end
+                    "end": end
                 })
         return jsonify({"events": events})
     except RefreshError:
@@ -187,9 +165,6 @@ def api_events():
 
 @app.route("/api/tasks", methods=["POST"])
 def api_tasks():
-    """
-    Given { goal, level, deadline } in JSON body, return a breakdown of tasks.
-    """
     data = request.get_json(force=True)
     tasks = breakdown_goal(
         data.get("goal", ""),
@@ -203,24 +178,10 @@ def api_tasks():
 
 @app.route("/api/schedule", methods=["POST"])
 def api_schedule():
-    """
-    Schedule tasks into the user’s Google Calendar. Expects JSON body:
-      {
-        tasks: [ { id, task, duration_hours }, … ],
-        start_date: <ISO timestamp>,
-        deadline: <"YYYY-MM-DD">,
-        settings: {
-          maxEventsPerDay: <int>,
-          allowedDaysOfWeek: [ "MO","TU",… ]
-        }
-      }
-    Returns:
-      { eventIds: [<Google event IDs>], unscheduled: [ { id, task }, … ] }
-    """
-    data       = request.get_json(force=True)
-    settings   = data.get("settings", {})
-    max_per_day  = settings.get("maxEventsPerDay", None)
-    allowed_days = settings.get("allowedDaysOfWeek", None)
+    data      = request.get_json(force=True)
+    settings  = data.get("settings", {})
+    max_hours_per_day  = settings.get("maxHoursPerDay", None)
+    allowed_days       = settings.get("allowedDaysOfWeek", None)
 
     svc = get_calendar_service()
     if not svc:
@@ -230,12 +191,13 @@ def api_schedule():
     start_iso = data.get("start_date")
     deadline  = data.get("deadline")
 
+    # Pass settings (max_hours_per_day, allowed_days) into schedule_tasks
     scheduled, unscheduled = schedule_tasks(
         svc,
         tasks,
         start_iso,
         deadline,
-        max_per_day=max_per_day,
+        max_hours_per_day=max_hours_per_day,
         allowed_days=allowed_days
     )
 
@@ -245,8 +207,3 @@ def api_schedule():
        "eventIds":    ids,
        "unscheduled": unscheduled
     })
-
-
-if __name__ == "__main__":
-    # Only run Flask’s built-in dev server if invoked directly
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)

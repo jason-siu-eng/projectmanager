@@ -4,200 +4,191 @@ from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from googleapiclient.errors import HttpError
 
-# ─── Constants ────────────────────────────────────────────────────────────────
+# Constants
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
-WORK_START = 9      # 9 AM fallback window
-WORK_END   = 22     # 10 PM fallback window
-BUFFER     = timedelta(hours=1)  # 1-hour break between events
-
-DEFAULT_MAX_TASKS_PER_DAY = 2
-
-CODE_TO_WEEKDAY = {
-    "MO": 0,
-    "TU": 1,
-    "WE": 2,
-    "TH": 3,
-    "FR": 4,
-    "SA": 5,
-    "SU": 6
-}
-
+WORK_START = 9    # 9 AM
+WORK_END   = 22   # 10 PM
 
 def schedule_tasks(
     service,
     tasks,
     start_iso,
     deadline_iso,
-    max_per_day=None,
+    max_hours_per_day=None,
     allowed_days=None
 ):
     """
-    Always shift scheduling to “tomorrow at 9 AM.” Then carve out free windows
-    between 9 AM and 10 PM on allowed weekdays, respecting max_per_day and leaving
-    a 1-hour BUFFER between events. If a task cannot fit before the deadline, it goes
-    into unscheduled.
+    service: authorized Google Calendar service
+    tasks:   [ {"id":…, "task":…, "duration_hours":…}, … ]
+    start_iso:    ISO timestamp string when scheduling may begin (e.g. now)
+    deadline_iso: ISO date string ("YYYY-MM-DD") by which all tasks must be scheduled
+    max_hours_per_day: integer or float, maximum total hours of OUR tasks per day
+    allowed_days: list of weekday codes, e.g. ["MO","TU","WE","TH","FR"]
+
+    Returns:
+      scheduled:   [ {"summary":…, "start":iso, "end":iso}, … ]
+      unscheduled: [ {"id":…, "task":…}, … ]
     """
-    # 1) Compute “start tomorrow at 9 AM”
-    original_dt = datetime.fromisoformat(start_iso).astimezone(LOCAL_TZ)
-    next_day_dt = (original_dt + timedelta(days=1)).replace(
-        hour=WORK_START, minute=0, second=0, microsecond=0
-    )
+    # 1) Parse our scheduling window
+    dt = datetime.fromisoformat(start_iso).astimezone(LOCAL_TZ)
+    # always start scheduling tomorrow if today has ANY events:
+    dt = dt.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
+    # Move dt to next day, because user wants “start tomorrow”
+    dt = (dt + timedelta(days=1)).replace(hour=WORK_START, minute=0)
 
-    # 2) Parse deadline date
     deadline_date = datetime.fromisoformat(deadline_iso).date()
-
-    # 3) Determine daily limit
-    daily_limit = max_per_day if (max_per_day is not None) else DEFAULT_MAX_TASKS_PER_DAY
-
-    # 4) Build set of allowed weekday indices
-    if allowed_days:
-        allowed_indices = { CODE_TO_WEEKDAY.get(code) for code in allowed_days if code in CODE_TO_WEEKDAY }
-    else:
-        allowed_indices = {0, 1, 2, 3, 4}  # default Mon–Fri
-
-    # 5) Fetch busy windows via FreeBusy
-    window_end = datetime.combine(
+    time_max = datetime.combine(
         deadline_date + timedelta(days=1),
         time(0, 0),
         tzinfo=LOCAL_TZ
     )
+
+    # 2) Fetch existing busy slots
     fb_req = {
-        "timeMin": next_day_dt.isoformat(),
-        "timeMax": window_end.isoformat(),
-        "timeZone": str(LOCAL_TZ),
+        "timeMin": dt.isoformat(),
+        "timeMax": time_max.isoformat(),
+        "timeZone": "America/Los_Angeles",
         "items": [{"id": "primary"}]
     }
-
     busy = []
     try:
         resp = service.freebusy().query(body=fb_req).execute()
         for period in resp["calendars"]["primary"]["busy"]:
-            bs = datetime.fromisoformat(period["start"]).astimezone(LOCAL_TZ)
-            be = datetime.fromisoformat(period["end"]).astimezone(LOCAL_TZ)
-            busy.append((bs, be))
-    except HttpError:
-        # If FreeBusy fails, proceed as if the calendar were empty
-        busy = []
+            start = datetime.fromisoformat(period["start"]).astimezone(LOCAL_TZ)
+            end   = datetime.fromisoformat(period["end"]).astimezone(LOCAL_TZ)
+            busy.append((start, end))
+    except HttpError as e:
+        # If free/busy fails, proceed as if calendar were empty
+        print("⚠️ free/busy lookup failed:", e)
 
-    return _schedule_by_freebusy(
-        tasks,
-        next_day_dt,
-        deadline_date,
-        daily_limit,
-        allowed_indices,
-        busy
-    )
-
-
-def _schedule_by_freebusy(
-    tasks,
-    start_dt,
-    deadline_date,
-    daily_limit,
-    allowed_indices,
-    busy
-):
-    """
-    Carve out free windows between WORK_START (9 AM) and WORK_END (10 PM).
-    For each task:
-      - Find the first available window that fits its duration
-      - Insert a 1-hour BUFFER after each scheduled block
-      - Respect daily_limit for each day
-      - Skip days not in allowed_indices
-    """
-    scheduled = []
+    scheduled   = []
     unscheduled = []
-    day_counts = {}
 
-    # 1) Initialize probe at max(start_dt, 9 AM of start_dt’s date)
-    probe = start_dt
-    if probe.hour < WORK_START:
-        probe = probe.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
+    # track total hours we’ve scheduled for each date
+    day_hours = {}  # e.g. { date(2025,6,2): 3.5, … }
 
-    def next_allowed_probe(dt_obj):
-        """
-        Move to 9 AM of the next allowed weekday after dt_obj.date()
-        """
-        nxt = datetime.combine(
-            dt_obj.date() + timedelta(days=1),
-            time(hour=WORK_START, minute=0),
-            tzinfo=LOCAL_TZ
-        )
-        while nxt.weekday() not in allowed_indices:
-            nxt = nxt + timedelta(days=1)
-            nxt = nxt.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
-        return nxt
-
+    # 3) For each task, find an open slot that also respects max_hours_per_day
     for t in tasks:
         duration = timedelta(hours=float(t.get("duration_hours", 1.0)))
-        slot = None
+        slot     = None
+        probe    = dt
 
+        # Walk day by day until deadline
         while probe.date() <= deadline_date:
-            if probe.weekday() in allowed_indices:
-                day = probe.date()
-                if day_counts.get(day, 0) < daily_limit:
-                    day_start = probe.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
-                    day_end   = probe.replace(hour=WORK_END,   minute=0, second=0, microsecond=0)
+            day = probe.date()
+            # Check “allowed_days” if provided (weekday codes: Monday=0, …)
+            if allowed_days:
+                weekday_code = ["MO","TU","WE","TH","FR","SA","SU"][day.weekday()]
+                if weekday_code not in allowed_days:
+                    # skip that day
+                    probe = (datetime.combine(day + timedelta(days=1), time(0,0), tzinfo=LOCAL_TZ)
+                             .replace(hour=WORK_START, minute=0))
+                    continue
 
-                    # 2) Build that day’s busy slices within [day_start, day_end]
-                    day_busy = []
-                    for bs, be in busy:
-                        if bs.date() <= day <= be.date():
-                            seg_start = max(bs, day_start)
-                            seg_end   = min(be, day_end)
-                            if seg_start < seg_end:
-                                day_busy.append((seg_start, seg_end))
-                    day_busy.sort(key=lambda x: x[0])
+            # figure how many hours we’ve scheduled so far on 'day'
+            used_hours = day_hours.get(day, 0.0)
+            if max_hours_per_day is not None and used_hours >= max_hours_per_day:
+                # no more hours left that day
+                probe = (datetime.combine(day + timedelta(days=1), time(0,0), tzinfo=LOCAL_TZ)
+                         .replace(hour=WORK_START, minute=0))
+                continue
 
-                    # 3) Carve out free windows
-                    free_windows = []
-                    cursor_fb = day_start
-                    for bs, be in day_busy:
-                        if bs > cursor_fb:
-                            free_windows.append((cursor_fb, bs))
-                        cursor_fb = max(cursor_fb, be)
-                    if cursor_fb < day_end:
-                        free_windows.append((cursor_fb, day_end))
+            # Build this day’s busy slices clipped to working hours
+            start_window = probe.replace(hour=WORK_START, minute=0)
+            end_window   = probe.replace(hour=WORK_END,   minute=0)
 
-                    # 4) Pick the first free window that fits
-                    for ws, we in free_windows:
-                        if (we - ws) >= duration:
-                            slot = (ws, ws + duration)
-                            break
+            day_busy = sorted(
+                (
+                    (max(start_window, bs), min(end_window, be))
+                    for bs, be in busy
+                    if bs.date() <= day <= be.date()
+                ),
+                key=lambda x: x[0]
+            )
+
+            # carve out free windows within [start_window..end_window]
+            free_windows = []
+            cursor = start_window
+            for bs, be in day_busy:
+                if bs > cursor:
+                    free_windows.append((cursor, bs))
+                cursor = max(cursor, be)
+            if cursor < end_window:
+                free_windows.append((cursor, end_window))
+
+            # how many hours remain allowed in that day?
+            hours_left = None
+            if max_hours_per_day is not None:
+                hours_left = max_hours_per_day - used_hours
+                if hours_left <= 0:
+                    # no hours left => skip day
+                    probe = (datetime.combine(day + timedelta(days=1), time(0,0), tzinfo=LOCAL_TZ)
+                             .replace(hour=WORK_START, minute=0))
+                    continue
+
+            # pick the first free window large enough to fit 'duration'
+            for ws, we in free_windows:
+                free_len = we - ws
+                # if “hours_left” is present, do not exceed it:
+                if hours_left is not None:
+                    allowed_slot_len = timedelta(hours=hours_left)
+                    if free_len >= duration and duration <= allowed_slot_len:
+                        slot = (ws, ws + duration)
+                        break
+                else:
+                    if free_len >= duration:
+                        slot = (ws, ws + duration)
+                        break
 
             if slot:
                 break
 
-            probe = next_allowed_probe(probe)
+            # Move to next day at WORK_START
+            next_day = datetime.combine(
+                day + timedelta(days=1),
+                time(0, 0),
+                tzinfo=LOCAL_TZ
+            )
+            probe = next_day.replace(hour=WORK_START, minute=0)
 
+        # If no slot found, record as unscheduled
         if not slot:
             unscheduled.append({"id": t["id"], "task": t["task"]})
-        else:
-            slot_start, slot_end = slot
-            scheduled.append({
-                "summary": t["task"],
-                "start":   slot_start.isoformat(),
-                "end":     slot_end.isoformat()
-            })
-            # 5) Mark this event + BUFFER as busy
-            busy.append((slot_start, slot_end + BUFFER))
-            day_counts[slot_start.date()] = day_counts.get(slot_start.date(), 0) + 1
-            probe = slot_end + BUFFER
+            continue
+
+        # Otherwise, record scheduled event
+        scheduled.append({
+            "summary": t["task"],
+            "start":   slot[0].isoformat(),
+            "end":     slot[1].isoformat()
+        })
+
+        # Mark that window as busy for subsequent tasks
+        busy.append(slot)
+
+        # Increment day_hours
+        d = slot[0].date()
+        hrs = float((slot[1] - slot[0]).total_seconds() / 3600.0)
+        day_hours[d] = day_hours.get(d, 0.0) + hrs
+
+        # Next probe begins when this task ends
+        dt = slot[1]
 
     return scheduled, unscheduled
 
 
 def create_calendar_events(service, scheduled):
     """
-    Insert each block in `scheduled` into Google Calendar.
-    Return a list of created event IDs.
+    Inserts each block in `scheduled` into Google Calendar.
+    Expects scheduled = [ {"summary":…, "start":iso, "end":iso}, … ]
+    Returns a list of created event IDs.
     """
     ids = []
     for ev in scheduled:
         body = {
             "summary": ev["summary"],
-            "start":   {"dateTime": ev["start"], "timeZone": str(LOCAL_TZ)},
-            "end":     {"dateTime": ev["end"],   "timeZone": str(LOCAL_TZ)},
+            "start":   {"dateTime": ev["start"], "timeZone": "America/Los_Angeles"},
+            "end":     {"dateTime": ev["end"],   "timeZone": "America/Los_Angeles"},
         }
         created = service.events().insert(calendarId="primary", body=body).execute()
         ids.append(created.get("id"))
