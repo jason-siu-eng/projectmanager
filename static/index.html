@@ -121,39 +121,26 @@
       flex-wrap: nowrap !important;
     }
 
-    /* 8. Settings modal overlay (transparent so page shows through) */
+    /* 8. Settings modal overlay */
     #settingsModal {
       display: none;
       position: fixed;
       top: 0; left: 0;
       width: 100%; height: 100%;
-      background: transparent; /* fully transparent overlay */
+      background: rgba(0,0,0,0.5);
       justify-content: center;
       align-items: center;
-      z-index: 9999;            /* sit above everything */
     }
 
-    /* 9. Settings modal content (white box) */
+    /* 9. Settings modal content */
     #settingsModal .modal-content {
-  background: #ffffff;        /* keep the white background */
-  padding: 1rem;
-  border-radius: 8px;
-  max-width: 700px;
-  width: 90%;
-  position: relative;
-
-  /* ✱ Add one of these to create a distinct outline ✱ */
-
-  /* Option A: a solid border */
-  border: 2px solid #333333;        /* dark gray border */
-
-  /* Option B: or, if you prefer a colored accent, e.g. blue: */
-  /* border: 2px solid #007BFF;     color-accented border */
-
-  /* Keep your box‐shadow for extra “lift” */
-  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-}
-
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      max-width: 400px;
+      width: 90%;
+      position: relative;
+    }
     #settingsModal .close {
       position: absolute;
       top: 0.5rem;
@@ -162,13 +149,11 @@
       cursor: pointer;
     }
 
-    /* 10. Seven-day checkboxes in a single row */
+    /* 10. Settings controls styling */
     #settingsModal .form-group.days {
       display: flex;
-      flex-wrap: nowrap;       /* force one line */
-      justify-content: space-between;
+      flex-wrap: wrap;
       gap: 0.5rem;
-      margin-bottom: 1rem;
     }
     #settingsModal .form-group.days label {
       display: flex;
@@ -230,13 +215,11 @@
     <div class="modal-content">
       <span class="close" id="closeSettings">&times;</span>
       <h2>Settings</h2>
-
       <!-- Max events per day -->
       <div class="form-group">
         <label for="maxEventsPerDay">Max events/day</label>
         <input type="number" id="maxEventsPerDay" min="1" value="3"/>
       </div>
-
       <!-- Allowed days of week -->
       <div class="form-group days">
         <label><input type="checkbox" value="MO" checked/> Mon</label>
@@ -247,18 +230,6 @@
         <label><input type="checkbox" value="SA"/> Sat</label>
         <label><input type="checkbox" value="SU"/> Sun</label>
       </div>
-
-      <!-- Preferred time of day dropdown -->
-      <div class="form-group">
-        <label for="preferredTime">Preferred time of day</label>
-        <select id="preferredTime">
-          <option value="morning">Morning (8 AM–12 PM)</option>
-          <option value="noon">Noon (12 PM–2 PM)</option>
-          <option value="afternoon">Afternoon (2 PM–6 PM)</option>
-          <option value="night">Night (6 PM–10 PM)</option>
-        </select>
-      </div>
-
       <button id="saveSettings">Save</button>
     </div>
   </div>
@@ -268,7 +239,7 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // ─── FullCalendar initialization ───────────────
+      // ─── FullCalendar initialization ─────────────────────────────────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridWeek',
@@ -282,14 +253,16 @@
       });
       calendar.render();
 
-      // ─── Google Sync ────────────────────────────────
+      // ─── Google Sync ─────────────────────────────────────────────────────────
       const syncBtn    = document.getElementById('syncBtn');
       const syncStatus = document.getElementById('syncStatus');
+
       async function syncGoogleEvents() {
         syncStatus.textContent = 'Syncing…';
         try {
           const resp = await fetch('/api/events', { credentials: 'include' });
           if (resp.status === 401) {
+            // not authenticated → redirect to /login
             window.location.href = '/login';
             return;
           }
@@ -304,7 +277,7 @@
       }
       syncBtn.addEventListener('click', syncGoogleEvents);
 
-      // ─── Task Generation ────────────────────────────
+      // ─── Task Generation ────────────────────────────────────────────────────
       const form       = document.getElementById('goalForm');
       const outlineDiv = document.getElementById('outline');
       const addBtn     = document.getElementById('addCalendarBtn');
@@ -330,6 +303,7 @@
         const { tasks } = await resp.json();
         lastTasks = tasks || [];
 
+        // Render outline
         outlineDiv.innerHTML = '<h2>Task Outline</h2>';
         const ol = document.createElement('ol');
         lastTasks.forEach(t => {
@@ -341,15 +315,14 @@
         addBtn.style.display = 'block';
       });
 
-      // ─── Add to Calendar ───────────────────────────
+      // ─── Add to Calendar ────────────────────────────────────────────────────
       addBtn.addEventListener('click', async () => {
         addBtn.disabled = true;
         addBtn.textContent = 'Adding…';
 
-        // get settings from localStorage
+        // get settings
         const maxPerDay   = parseInt(localStorage.getItem('maxEventsPerDay') || '3', 10);
         const allowedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
-        const preferredTime = localStorage.getItem('preferredTime') || 'morning';
 
         const resp = await fetch('/api/schedule', {
           method: 'POST',
@@ -361,22 +334,17 @@
             deadline: lastDeadline,
             settings: {
               maxEventsPerDay: maxPerDay,
-              allowedDaysOfWeek: allowedDays,
-              preferredTimeOfDay: preferredTime
+              allowedDaysOfWeek: allowedDays
             }
           })
         });
         const data = await resp.json();
 
         if (!resp.ok) {
-          alert("Error scheduling tasks: " + (data.message||data.error));
+          alert("Error scheduling tasks: " + (data.message || data.error));
         } else {
           if (data.unscheduled?.length) {
-            alert(
-              data.unscheduled
-                .map(u => `Could not schedule #${u.id}: ${u.task}`)
-                .join("\n")
-            );
+            alert(data.unscheduled.map(u => `Could not schedule #${u.id}: ${u.task}`).join("\n"));
           }
           await syncGoogleEvents();
         }
@@ -389,7 +357,7 @@
         }, 1500);
       });
 
-      // ─── Settings Popup ────────────────────────────
+      // ─── Settings Popup ──────────────────────────────────────────────────────
       const settingsBtn   = document.getElementById('settingsBtn');
       const settingsModal = document.getElementById('settingsModal');
       const closeSettings = document.getElementById('closeSettings');
@@ -405,21 +373,19 @@
         if (e.target === settingsModal) settingsModal.style.display = 'none';
       });
 
-      // Persist settings
+      // Persist settings (no preferredTime)
       saveSettings.addEventListener('click', () => {
         const maxEvt = parseInt(document.getElementById('maxEventsPerDay').value, 10);
         const days   = Array.from(
           document.querySelectorAll('#settingsModal .form-group.days input:checked')
         ).map(cb => cb.value);
-        const pref   = document.getElementById('preferredTime').value;
 
         localStorage.setItem('maxEventsPerDay', maxEvt);
         localStorage.setItem('allowedDays', JSON.stringify(days));
-        localStorage.setItem('preferredTime', pref);
         settingsModal.style.display = 'none';
       });
 
-      // Load settings into form
+      // Load settings into form (no preferredTime)
       const storedMax = localStorage.getItem('maxEventsPerDay');
       if (storedMax) {
         document.getElementById('maxEventsPerDay').value = storedMax;
@@ -428,10 +394,6 @@
       if (storedDays.length) {
         document.querySelectorAll('#settingsModal .form-group.days input')
           .forEach(cb => cb.checked = storedDays.includes(cb.value));
-      }
-      const storedTime = localStorage.getItem('preferredTime');
-      if (storedTime) {
-        document.getElementById('preferredTime').value = storedTime;
       }
     });
   </script>

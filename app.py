@@ -17,7 +17,7 @@ FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
 REDIRECT_URI     = os.getenv("REDIRECT_URI", "").strip()
 GOOGLE_CRED_JSON = os.getenv("GOOGLE_CRED_JSON")
 
-# ─── Parse Google credentials: prefer env var, fallback to local file ─────────
+# ─── Parse Google credentials: prefer env var, fall back to local file ─────────
 if GOOGLE_CRED_JSON:
     try:
         parsed_creds = json.loads(GOOGLE_CRED_JSON)
@@ -43,9 +43,7 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 # ─── Flask setup ─────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder="static")
 app.secret_key = FLASK_SECRET_KEY
-# Enable CORS with cookie‐based sessions
 CORS(app, supports_credentials=True)
-
 
 # ─── Project logic imports ───────────────────────────────────────────────────
 from task_breakdown import breakdown_goal
@@ -55,7 +53,7 @@ from calendar_integration import schedule_tasks, create_calendar_events
 def get_calendar_service():
     """
     If the user has stored credentials in session, reconstruct the Credentials object.
-    Attempt a refresh if expired; otherwise, return None to indicate “not authenticated.”
+    Attempt a refresh if expired; otherwise return None → not authenticated.
     """
     creds_info = session.get("credentials")
     if not creds_info:
@@ -73,7 +71,6 @@ def get_calendar_service():
     try:
         if not creds.valid:
             creds.refresh(Request())
-        # Save any updated token back into session
         session["credentials"] = {
             "token": creds.token,
             "refresh_token": creds.refresh_token,
@@ -92,7 +89,7 @@ def get_calendar_service():
 @app.route("/")
 def index():
     """
-    Serve the React/HTML front end from the 'static' folder.
+    Serve index.html from the static folder.
     """
     return send_from_directory(app.static_folder, "index.html")
 
@@ -100,8 +97,8 @@ def index():
 @app.route("/login")
 def login():
     """
-    Step 1 of OAuth: clear any old session, build a new InstalledAppFlow,
-    and redirect the user to Google's consent screen.
+    Step 1 of OAuth: clear any old session, create an InstalledAppFlow,
+    and redirect user to Google’s consent screen.
     """
     try:
         session.clear()
@@ -125,7 +122,7 @@ def login():
 def oauth2callback():
     """
     Step 2 of OAuth: Google calls us back here with ?code=…&state=….
-    Verify state, fetch the token, and store credentials in session.
+    Verify state, fetch token, store credentials in session, then redirect to index.
     """
     try:
         state = session.pop("state", None)
@@ -157,7 +154,7 @@ def oauth2callback():
 @app.route("/api/events")
 def api_events():
     """
-    Return all upcoming (non–all-day) events from the user's primary calendar.
+    Return all upcoming (non–all-day) events on the user’s primary calendar.
     If not authenticated, respond with 401.
     """
     service = get_calendar_service()
@@ -191,8 +188,7 @@ def api_events():
 @app.route("/api/tasks", methods=["POST"])
 def api_tasks():
     """
-    Given { goal, level, deadline } in JSON body, use `breakdown_goal`
-    to return an array of tasks (each with at least `task` and `duration_hours`).
+    Given { goal, level, deadline } in JSON body, return a breakdown of tasks.
     """
     data = request.get_json(force=True)
     tasks = breakdown_goal(
@@ -200,7 +196,6 @@ def api_tasks():
         data.get("level", "easy"),
         data.get("deadline", "")
     )
-    # Ensure every task has a duration_hours field
     for t in tasks:
         t.setdefault("duration_hours", 1.0)
     return jsonify({"tasks": tasks})
@@ -209,49 +204,41 @@ def api_tasks():
 @app.route("/api/schedule", methods=["POST"])
 def api_schedule():
     """
-    Schedule the tasks in the user's Google Calendar.
-    Expects JSON body:
-    {
-      tasks: [ { id, task, duration_hours }, … ],
-      start_date: <ISO timestamp>,
-      deadline: <"YYYY-MM-DD">,
-      settings: {
-        maxEventsPerDay: <int>,
-        allowedDaysOfWeek: [ "MO","TU",… ],
-        preferredTimeOfDay: "morning"|"noon"|"afternoon"|"night"
+    Schedule tasks into the user’s Google Calendar. Expects JSON body:
+      {
+        tasks: [ { id, task, duration_hours }, … ],
+        start_date: <ISO timestamp>,
+        deadline: <"YYYY-MM-DD">,
+        settings: {
+          maxEventsPerDay: <int>,
+          allowedDaysOfWeek: [ "MO","TU",… ]
+        }
       }
-    }
     Returns:
       { eventIds: [<Google event IDs>], unscheduled: [ { id, task }, … ] }
     """
-    data      = request.get_json(force=True)
-    settings  = data.get("settings", {})
-
-    # Extract user settings (if any)
-    max_per_day     = settings.get("maxEventsPerDay", None)
-    allowed_days    = settings.get("allowedDaysOfWeek", None)
-    preferred_time  = settings.get("preferredTimeOfDay", None)
+    data       = request.get_json(force=True)
+    settings   = data.get("settings", {})
+    max_per_day  = settings.get("maxEventsPerDay", None)
+    allowed_days = settings.get("allowedDaysOfWeek", None)
 
     svc = get_calendar_service()
     if not svc:
-        return jsonify({"error": "not_authenticated"}), 401
+        return jsonify({"error":"not_authenticated"}), 401
 
-    tasks      = data.get("tasks", [])
-    start_iso  = data.get("start_date")
-    deadline   = data.get("deadline")
+    tasks     = data.get("tasks", [])
+    start_iso = data.get("start_date")
+    deadline  = data.get("deadline")
 
-    # Call our schedule_tasks with all three settings parameters
     scheduled, unscheduled = schedule_tasks(
         svc,
         tasks,
         start_iso,
         deadline,
         max_per_day=max_per_day,
-        allowed_days=allowed_days,
-        preferred_time=preferred_time
+        allowed_days=allowed_days
     )
 
-    # Insert events into Google Calendar
     ids = create_calendar_events(svc, scheduled)
 
     return jsonify({
@@ -261,5 +248,5 @@ def api_schedule():
 
 
 if __name__ == "__main__":
-    # Only run the Flask dev server when explicitly invoked
+    # Only run Flask’s built-in dev server if invoked directly
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)
