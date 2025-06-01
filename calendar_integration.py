@@ -21,6 +21,7 @@ CODE_TO_WEEKDAY = {
     "SU": 6
 }
 
+# Preferred‐time windows (start_hour, end_hour)
 PREFERRED_WINDOWS = {
     "morning":   (8, 12),   #  8:00–12:00
     "noon":      (12, 14),  # 12:00–14:00
@@ -39,119 +40,180 @@ def schedule_tasks(
     preferred_time=None
 ):
     """
-    - If the user’s calendar is completely empty (no busy slots), schedule each task
-      in the user’s “preferred_time” window (e.g. 8–12 for morning) on allowed weekdays.
-    - Otherwise, carve out free slots between WORK_START (9 AM) and WORK_END (10 PM),
-      respecting max_per_day and allowed_days.
+    Schedule tasks into Google Calendar under these rules:
+      1) Always begin ON THE NEXT DAY after `start_iso` (never use current day).
+      2) If the calendar is empty (no busy slots), and `preferred_time` is valid,
+         place each task in that chosen window (e.g. 8–12 for morning) on allowed weekdays.
+      3) If there are any busy slots, fall back to “free/busy carve‐out” between WORK_START (9 AM) and WORK_END (10 PM).
+
+    Args:
+      service: authorized Google Calendar service
+      tasks: list of { "id", "task", "duration_hours" }
+      start_iso: ISO timestamp string (we’ll add 1 day internally)
+      deadline_iso: “YYYY-MM-DD” by which tasks must finish
+      max_per_day: int override for maximum events per day
+      allowed_days: [ "MO","TU",…, "SU" ] two‐letter codes
+      preferred_time: one of "morning","noon","afternoon","night"
+    Returns:
+      scheduled:   [ { "summary":…, "start": <ISO>, "end": <ISO> }, … ]
+      unscheduled: [ { "id":…, "task":… }, … ]
     """
-    # 1) Parse scheduling window
-    dt_start = datetime.fromisoformat(start_iso).astimezone(LOCAL_TZ)
+
+    # 1) Parse start date, then shift to next calendar day
+    original_dt = datetime.fromisoformat(start_iso).astimezone(LOCAL_TZ)
+    # Move to next day at same clock time, then clamp to midnight‐plus‐WORK_START in helpers
+    next_day_dt = (original_dt + timedelta(days=1)).replace(
+        hour=WORK_START, minute=0, second=0, microsecond=0
+    )
+
+    # 2) Parse deadline date
     deadline_date = datetime.fromisoformat(deadline_iso).date()
 
-    # Determine daily limit
-    daily_limit = max_per_day or DEFAULT_MAX_TASKS_PER_DAY
+    # 3) Determine daily limit
+    daily_limit = max_per_day if (max_per_day is not None) else DEFAULT_MAX_TASKS_PER_DAY
 
-    # Build allowed‐weekday set
+    # 4) Build set of allowed weekday indices
     if allowed_days:
         allowed_indices = { CODE_TO_WEEKDAY.get(code) for code in allowed_days if code in CODE_TO_WEEKDAY }
     else:
-        allowed_indices = {0,1,2,3,4}  # default Mon–Fri
+        # Default to Monday–Friday
+        allowed_indices = {0, 1, 2, 3, 4}
 
-    # 2) Free/Busy query
+    # 5) Free/Busy query from next_day_dt to day after deadline
     window_end = datetime.combine(
         deadline_date + timedelta(days=1),
-        time(0,0),
+        time(0, 0),
         tzinfo=LOCAL_TZ
     )
     fb_req = {
-        "timeMin": dt_start.isoformat(),
+        "timeMin": next_day_dt.isoformat(),
         "timeMax": window_end.isoformat(),
         "timeZone": str(LOCAL_TZ),
         "items": [{"id": "primary"}]
     }
+
     busy = []
     try:
         resp = service.freebusy().query(body=fb_req).execute()
-        periods = resp["calendars"]["primary"]["busy"]
-        for p in periods:
-            bs = datetime.fromisoformat(p["start"]).astimezone(LOCAL_TZ)
-            be = datetime.fromisoformat(p["end"]).astimezone(LOCAL_TZ)
+        for period in resp["calendars"]["primary"]["busy"]:
+            bs = datetime.fromisoformat(period["start"]).astimezone(LOCAL_TZ)
+            be = datetime.fromisoformat(period["end"]).astimezone(LOCAL_TZ)
             busy.append((bs, be))
     except HttpError:
-        # Treat as “empty calendar” if freebusy fails
+        # If freebusy fails, treat as completely empty calendar
         busy = []
 
-    # If calendar is empty and user selected a valid preferred_time, use that logic
+    # 6) If no busy slots AND preferred_time is valid, use preferred‐time logic
     if not busy and preferred_time in PREFERRED_WINDOWS:
         return _schedule_by_preferred_time(
-            tasks, dt_start, deadline_date,
-            daily_limit, allowed_indices, preferred_time
+            tasks,
+            next_day_dt,
+            deadline_date,
+            daily_limit,
+            allowed_indices,
+            preferred_time
         )
-    else:
-        return _schedule_by_freebusy(
-            tasks, dt_start, deadline_date,
-            daily_limit, allowed_indices, busy
-        )
+
+    # 7) Otherwise, use “freebusy carve‐out” logic
+    return _schedule_by_freebusy(
+        tasks,
+        next_day_dt,
+        deadline_date,
+        daily_limit,
+        allowed_indices,
+        busy
+    )
 
 
 def _schedule_by_preferred_time(
     tasks,
-    dt_start,
+    start_dt,
     deadline_date,
     daily_limit,
     allowed_indices,
     preferred_time
 ):
     """
-    Place each task strictly within the user’s chosen window (e.g. 8–12 for morning),
-    up to daily_limit on allowed weekdays. If a task can’t fit before the deadline, it’s unscheduled.
+    Place each task strictly within the user’s chosen window (e.g. 8–12 for morning)
+    on allowed weekdays. Always begins at start_dt (which is already next‐day at WORK_START).
     """
     scheduled = []
     unscheduled = []
     day_counts = {}
 
-    window_start, window_end = PREFERRED_WINDOWS[preferred_time]
+    window_start_hour, window_end_hour = PREFERRED_WINDOWS[preferred_time]
 
-    # Helper to get next allowed date
-    def next_allowed(d):
+    # Helper: find the next allowed date (including the given date) that >= dt.date()
+    def next_allowed_date_from(dt_obj):
+        d = dt_obj.date()
         while d.weekday() not in allowed_indices:
             d = d + timedelta(days=1)
         return d
 
-    current_date = next_allowed(dt_start.date())
-
-    # Starting cursor: clamp to window_start on that date (or if dt_start is later but still before window_end, use dt_start)
-    if current_date == dt_start.date() and dt_start.hour >= window_start and dt_start.hour < window_end:
-        cursor = dt_start
+    # Initialize: clamp start_dt to the correct window start on its date
+    current_date = next_allowed_date_from(start_dt)
+    # If the start_dt time is already later than window_start_hour but before window_end_hour, use start_dt
+    if (current_date == start_dt.date() and
+        start_dt.hour >= window_start_hour and
+        start_dt.hour < window_end_hour):
+        cursor = start_dt
     else:
-        cursor = datetime.combine(current_date, time(hour=window_start, minute=0), tzinfo=LOCAL_TZ)
+        cursor = datetime.combine(
+            current_date,
+            time(hour=window_start_hour, minute=0),
+            tzinfo=LOCAL_TZ
+        )
 
     for t in tasks:
         duration = timedelta(hours=float(t.get("duration_hours", 1.0)))
         placed = False
 
         while current_date <= deadline_date:
+            # Only attempt if weekday is allowed
             if current_date.weekday() in allowed_indices:
-                if day_counts.get(current_date, 0) < daily_limit:
-                    day_window_end = datetime.combine(current_date, time(hour=window_end, minute=0), tzinfo=LOCAL_TZ)
+                count_for_day = day_counts.get(current_date, 0)
+                if count_for_day < daily_limit:
+                    # Build the window’s end time for that date
+                    day_window_end = datetime.combine(
+                        current_date,
+                        time(hour=window_end_hour, minute=0),
+                        tzinfo=LOCAL_TZ
+                    )
+                    # Ensure cursor is not before the window start
+                    earliest_allowed = datetime.combine(
+                        current_date,
+                        time(hour=window_start_hour, minute=0),
+                        tzinfo=LOCAL_TZ
+                    )
+                    if cursor < earliest_allowed:
+                        cursor = earliest_allowed
+
+                    # If there’s enough room in this day’s window for the task:
                     if cursor + duration <= day_window_end:
-                        # Place it here
+                        slot_start = cursor
+                        slot_end   = cursor + duration
+
                         scheduled.append({
                             "summary": t["task"],
-                            "start":   cursor.isoformat(),
-                            "end":     (cursor + duration).isoformat()
+                            "start":   slot_start.isoformat(),
+                            "end":     slot_end.isoformat()
                         })
-                        day_counts[current_date] = day_counts.get(current_date, 0) + 1
-                        cursor = cursor + duration
+                        day_counts[current_date] = count_for_day + 1
+                        cursor = slot_end  # move cursor forward
                         placed = True
                         break
 
-            # Move to the next allowed weekday at window_start
-            next_day = next_allowed(current_date + timedelta(days=1))
-            if next_day > deadline_date:
+            # Either day is full or no room—move to next allowed date at window_start
+            next_date = current_date + timedelta(days=1)
+            next_date = next_allowed_date_from(datetime.combine(next_date, time(0,0), tzinfo=LOCAL_TZ))
+            if next_date > deadline_date:
                 break
-            current_date = next_day
-            cursor = datetime.combine(current_date, time(hour=window_start, minute=0), tzinfo=LOCAL_TZ)
+            current_date = next_date
+            cursor = datetime.combine(
+                current_date,
+                time(hour=window_start_hour, minute=0),
+                tzinfo=LOCAL_TZ
+            )
 
         if not placed:
             unscheduled.append({"id": t["id"], "task": t["task"]})
@@ -161,24 +223,26 @@ def _schedule_by_preferred_time(
 
 def _schedule_by_freebusy(
     tasks,
-    dt_start,
+    start_dt,
     deadline_date,
     daily_limit,
     allowed_indices,
     busy
 ):
     """
-    Original approach: carve out free windows between WORK_START and WORK_END 
-    on each allowed weekday and place tasks in the first spot that fits.
+    Original freebusy carve‐out:
+      - Begin at start_dt (already next day at 9 AM).
+      - For each task, scan allowed weekdays day by day, carve out free windows
+        between 9 AM and 10 PM, and place the task in the first fitting slot.
     """
     scheduled = []
     unscheduled = []
     day_counts = {}
 
-    # Start probing at WORK_START on dt_start’s date (or later if dt_start is after 9 AM)
-    probe = dt_start.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
-    if dt_start.hour > WORK_START:
-        probe = dt_start
+    # Initialize probe at 9 AM of start_dt’s date (or keep start_dt if it’s later)
+    probe = start_dt
+    if probe.hour < WORK_START:
+        probe = probe.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
 
     def next_allowed_probe(dt_obj):
         nxt = datetime.combine(
@@ -188,7 +252,7 @@ def _schedule_by_freebusy(
         )
         while nxt.weekday() not in allowed_indices:
             nxt = nxt + timedelta(days=1)
-            nxt = nxt.replace(hour=WORK_START, minute=0)
+            nxt = nxt.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
         return nxt
 
     for t in tasks:
@@ -199,10 +263,10 @@ def _schedule_by_freebusy(
             if probe.weekday() in allowed_indices:
                 day = probe.date()
                 if day_counts.get(day, 0) < daily_limit:
-                    day_start = probe.replace(hour=WORK_START, minute=0)
-                    day_end   = probe.replace(hour=WORK_END,   minute=0)
+                    day_start = probe.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
+                    day_end   = probe.replace(hour=WORK_END,   minute=0, second=0, microsecond=0)
 
-                    # Build that day’s busy slices
+                    # Build today’s busy slices within [day_start, day_end]
                     day_busy = []
                     for bs, be in busy:
                         if bs.date() <= day <= be.date():
@@ -213,17 +277,17 @@ def _schedule_by_freebusy(
                     day_busy.sort(key=lambda x: x[0])
 
                     # Carve out free windows
-                    free = []
+                    free_windows = []
                     cursor_fb = day_start
                     for bs, be in day_busy:
                         if bs > cursor_fb:
-                            free.append((cursor_fb, bs))
+                            free_windows.append((cursor_fb, bs))
                         cursor_fb = max(cursor_fb, be)
                     if cursor_fb < day_end:
-                        free.append((cursor_fb, day_end))
+                        free_windows.append((cursor_fb, day_end))
 
-                    # Find first free window that fits
-                    for ws, we in free:
+                    # Pick the first free window that fits
+                    for ws, we in free_windows:
                         if (we - ws) >= duration:
                             slot = (ws, ws + duration)
                             break
@@ -250,8 +314,7 @@ def _schedule_by_freebusy(
 
 def create_calendar_events(service, scheduled):
     """
-    For each dict in `scheduled` (having "summary", "start", "end"), insert it into Google Calendar.
-    Return a list of created event IDs.
+    Insert each event in `scheduled` into the user’s primary calendar.
     """
     ids = []
     for ev in scheduled:
