@@ -1,58 +1,37 @@
 # task_breakdown.py
-
-import os
-import json
-from datetime import datetime
+import os, json
 from typing import List, Dict
-
+from datetime import datetime
 import openai
 
-# ── 1) CONFIGURE OPENAI ───────────────────────────────────────────────────────────
+# 1) Configure API key (this should come from Render’s env)
 openai.api_key = os.getenv("OPENAI_API_KEY", "").strip()
 if not openai.api_key:
-    raise RuntimeError("Please set OPENAI_API_KEY in environment")
-
+    raise RuntimeError("OPENAI_API_KEY is missing or empty!")
 
 def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
-    """
-    Breaks down `goal` (string) into a variable number of actionable steps, 
-    based on how many days remain until `deadline` (ISO date).
-    For each step, also estimate "duration_hours" (a float).
-    
-    Returns:
-      [
-        { "id": 1, "task": "…", "duration_hours": 2.0 },
-        { "id": 2, "task": "…", "duration_hours": 1.5 },
-        …
-      ]
-    """
-    # ── 2) CALCULATE DAYS UNTIL DEADLINE ────────────────────────────────────────
+    # Compute days_left exactly as you had it
     try:
         today = datetime.utcnow().date()
-        deadline_date = datetime.fromisoformat(deadline).date()
-        days_left = max((deadline_date - today).days, 1)
+        dl = datetime.fromisoformat(deadline).date()
+        days_left = max((dl - today).days, 1)
     except Exception:
-        # If parsing fails, default to 7 days
         days_left = 7
 
-    # ── 3) BUILD PROMPT ─────────────────────────────────────────────────────────
+    # Build prompt
     prompt = (
-        f"You are a helpful assistant that breaks down high-level goals into actionable tasks. "
-        f"The user has {days_left} day(s) until the deadline.  "
-        f"Create however many steps are needed to achieve this goal in {days_left} days, "
-        f"aiming for roughly one step per day but you may combine or split tasks logically.  "
-        f"For each step, also estimate how many hours it will take (e.g. 1.5).  "
-        f"Return your entire answer as a pure JSON array of objects, where each object has keys:\n\n"
-        f"    id: (integer, step number),\n"
-        f"    task: (string) the description of that step,\n"
-        f"    duration_hours: (number) hours (can be decimal) for that step.\n\n"
-        f"User’s proficiency level: \"{level}\"\n"
-        f"Deadline: {deadline}\n"
-        f"Goal: {goal}\n\n"
-        f"Respond **ONLY** with valid JSON, with no extra text or markdown."
+        f"You are a helpful assistant that breaks down high-level goals into steps. "
+        f"User has {days_left} day(s) to achieve the goal: \"{goal}\" at proficiency \"{level}\". "
+        f"Return an array of objects in JSON, each with keys: id (int), task (string), and duration_hours (decimal)."
     )
 
-    # ── 4) CALL OPENAI ────────────────────────────────────────────────────────────
+    # ─── Add these debug prints ──────────────────────────────────────────────────
+    print("=== breakdown_goal called on Render ===")
+    print("days_left =", days_left)
+    print("PROMPT =")
+    print(prompt)
+    # ──────────────────────────────────────────────────────────────────────────────
+
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -61,35 +40,40 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.7,
-            max_tokens=days_left * 80  # adjust to allow enough tokens for X steps
+            max_tokens=days_left * 80
         )
         raw = response.choices[0].message.content.strip()
-    except Exception:
-        # If the API call fails for any reason:
+
+        # ─── Log raw AI output for inspection ─────────────────────────────────────
+        print("RAW OPENAI RESPONSE:")
+        print(raw)
+        # ──────────────────────────────────────────────────────────────────────────
+    except Exception as e:
+        print("OpenAI API call failed with exception:", repr(e))
         raw = None
 
-    # ── 5) PARSE JSON OR FALL BACK ────────────────────────────────────────────────
+    # Try to parse JSON
     if raw:
         try:
             data = json.loads(raw)
-            tasks: List[Dict] = []
-            for i, obj in enumerate(data, start=1):
+            tasks = []
+            for idx, obj in enumerate(data, start=1):
                 desc = obj.get("task", "").strip()
-                dur = float(obj.get("duration_hours", 1.0))
-                tasks.append({"id": i, "task": desc, "duration_hours": dur})
-            # If the model for some reason returned fewer than 1 element, pad:
-            if len(tasks) == 0:
-                raise ValueError("No tasks returned")
+                dur  = float(obj.get("duration_hours", 1.0))
+                tasks.append({"id": idx, "task": desc, "duration_hours": dur})
+            if not tasks:
+                raise ValueError("Empty array returned")
             return tasks
-        except Exception:
-            # Fall thru to placeholder
-            pass
+        except Exception as parse_err:
+            print("JSON parse failed. raw was:", raw)
+            print("Parsing exception:", repr(parse_err))
 
-    # ── 6) FALLBACK: GENERIC PLACEHOLDERS ────────────────────────────────────────
-    # If we get here, parsing failed or raw==None.
-    # Return one placeholder per day_left (or at least 1)
-    fallback_count = max(days_left, 1)
-    return [
-        {"id": i + 1, "task": f"(Step {i + 1} placeholder)", "duration_hours": 1.0}
-        for i in range(fallback_count)
+    # Fallback to placeholders
+    print("FALLING BACK to placeholders on Render.")
+    fallback = [
+        {"id": i + 1,
+         "task": f"(Step {i + 1} placeholder)",
+         "duration_hours": 1.0}
+        for i in range(days_left)
     ]
+    return fallback
