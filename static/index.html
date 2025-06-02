@@ -102,6 +102,9 @@
     /* 6. Calendar container */
     #calendar {
       margin-top: 2rem;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
     }
 
     /* 7. FullCalendar button tweaks */
@@ -315,21 +318,39 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // ─── FullCalendar initialization ───────────────
+      // ─── FullCalendar TIME‐GRID initialization ───────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'dayGridWeek',
+        // 1) Show a 7‐day horizontal time grid, with vertical time axis:
+        initialView: 'timeGridWeek',
+
+        // 2) Toolbar at top: Prev | Today | Next   Title   timeGridWeek, timeGridDay
         headerToolbar: {
-          left: 'prev,today,next',
+          left: 'prev today next',
           center: 'title',
-          right: 'dayGridWeek,dayGridDay'
+          right: 'timeGridWeek timeGridDay'
         },
+
+        // 3) Do NOT show the “all‐day” slot row:
+        allDaySlot: false,
+
+        // 4) Only show slots from 6:00 AM through 10:00 PM:
+        slotMinTime: '06:00:00',
+        slotMaxTime: '22:00:00',
+
+        // 5) Show a thin “current time” marker line:
+        nowIndicator: true,
+
+        // 6) Make events non‐editable (for now):
         editable: false,
-        selectable: false
+        selectable: false,
+
+        // 7) Set a consistent height so it looks like a “daily planner”:
+        height: 'auto'
       });
       calendar.render();
 
-      // ─── Google Sync ────────────────────────────────
+      // ─── Google Sync (timeGrid) ────────────────────────────────
       const syncBtn    = document.getElementById('syncBtn');
       const syncStatus = document.getElementById('syncStatus');
       async function syncGoogleEvents() {
@@ -337,12 +358,18 @@
         try {
           const resp = await fetch('/api/events', { credentials: 'include' });
           if (resp.status === 401) {
+            // not authenticated → redirect to /login
             window.location.href = '/login';
             return;
           }
           const { events } = await resp.json();
+
+          // 1) Remove all existing events:
           calendar.removeAllEvents();
+
+          // 2) Add new events in “timeGrid” format:
           calendar.addEventSource(events);
+
           syncStatus.textContent = 'Synced';
         } catch (err) {
           console.error('Sync error', err);
