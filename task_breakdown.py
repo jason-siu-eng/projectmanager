@@ -5,8 +5,7 @@ import json
 from datetime import datetime
 from typing import List, Dict
 
-from openai import OpenAI     # v1 client
-# Remove: from openai.error import OpenAIError
+from openai import OpenAI  # v1 client
 
 # ── 1) INITIALIZE v1 CLIENT ────────────────────────────────────────────────────
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
@@ -35,7 +34,8 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
     prompt = (
         f"You are a helpful assistant that breaks down high-level goals into actionable tasks. "
         f"The user has {days_left} day(s) until the deadline. "
-        f"Create however many steps are needed to achieve this goal in {days_left} days—roughly one step per day, but you may combine or split logically as needed. "
+        f"Create however many steps are needed to achieve this goal in {days_left} days—roughly one step per day, "
+        f"but you may combine or split logically as needed. "
         f"For each step, estimate how many hours it will take (decimal OK). "
         f"Respond with a pure JSON array of objects, each containing:\n"
         f"    id: (integer) step number,\n"
@@ -60,10 +60,10 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a JSON-output specialist."},
-                {"role": "user",   "content": prompt},
+                {"role": "user", "content": prompt},
             ],
             temperature=0.7,
-            max_tokens=days_left * 80
+            max_tokens=days_left * 80,
         )
         raw = response.choices[0].message.content.strip()
         print("RAW OPENAI RESPONSE:")
@@ -81,7 +81,7 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
             tasks: List[Dict] = []
             for idx, obj in enumerate(data, start=1):
                 desc = obj.get("task", "").strip()
-                dur  = float(obj.get("duration_hours", 1.0))
+                dur = float(obj.get("duration_hours", 1.0))
                 tasks.append({"id": idx, "task": desc, "duration_hours": dur})
 
             if len(tasks) == 0:
@@ -100,7 +100,7 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
         {
             "id": i + 1,
             "task": f"(Step {i + 1} placeholder)",
-            "duration_hours": 1.0
+            "duration_hours": 1.0,
         }
         for i in range(fallback_count)
     ]
