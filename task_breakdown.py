@@ -1,86 +1,95 @@
 # task_breakdown.py
 
 import os
-import openai
+import json
+from datetime import datetime
 from typing import List, Dict
 
-# Ensure OPENAI_API_KEY is set in environment
-openai.api_key = os.getenv("OPENAI_API_KEY", "")
+import openai
+
+# ── 1) CONFIGURE OPENAI ───────────────────────────────────────────────────────────
+openai.api_key = os.getenv("OPENAI_API_KEY", "").strip()
 if not openai.api_key:
     raise RuntimeError("Please set OPENAI_API_KEY in environment")
 
 
-def breakdown_goal(goal: str, level: str, deadline: str, totalTasks: int) -> List[Dict]:
+def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
     """
-    Use OpenAI to break down `goal` into exactly `totalTasks` actionable steps.
-    For each step, the model will also estimate "duration_hours" (a float).
-    We instruct the model to output a pure JSON array, e.g.:
+    Breaks down `goal` (string) into a variable number of actionable steps, 
+    based on how many days remain until `deadline` (ISO date).
+    For each step, also estimate "duration_hours" (a float).
+    
+    Returns:
       [
-        { "task": "Do X", "duration_hours": 2.5 },
-        ...
+        { "id": 1, "task": "…", "duration_hours": 2.0 },
+        { "id": 2, "task": "…", "duration_hours": 1.5 },
+        …
       ]
-
-    Returns a list of dictionaries:
-      [ { "id": 1, "task": "...", "duration_hours": 2.5 }, … ]
     """
+    # ── 2) CALCULATE DAYS UNTIL DEADLINE ────────────────────────────────────────
+    try:
+        today = datetime.utcnow().date()
+        deadline_date = datetime.fromisoformat(deadline).date()
+        days_left = max((deadline_date - today).days, 1)
+    except Exception:
+        # If parsing fails, default to 7 days
+        days_left = 7
+
+    # ── 3) BUILD PROMPT ─────────────────────────────────────────────────────────
     prompt = (
-        f"You are a helpful assistant that breaks down high-level goals into actionable steps. "
-        f"Please create exactly {totalTasks} steps to achieve the following goal. "
-        f"For each step, also estimate how many hours it will take (using decimals, e.g. 1.5). "
-        f"Format your entire response as a JSON array (no extra text), where each element is an "
-        f"object with these keys:\n"
-        f"    task: (string) the description of the step,\n"
-        f"    duration_hours: (number) the estimated hours needed.\n\n"
-        f"Here are the constraints:\n"
-        f"- The user’s proficiency level is \"{level}\".\n"
-        f"- The deadline is {deadline}.\n"
-        f"- Output exactly {totalTasks} objects in the array.\n\n"
+        f"You are a helpful assistant that breaks down high-level goals into actionable tasks. "
+        f"The user has {days_left} day(s) until the deadline.  "
+        f"Create however many steps are needed to achieve this goal in {days_left} days, "
+        f"aiming for roughly one step per day but you may combine or split tasks logically.  "
+        f"For each step, also estimate how many hours it will take (e.g. 1.5).  "
+        f"Return your entire answer as a pure JSON array of objects, where each object has keys:\n\n"
+        f"    id: (integer, step number),\n"
+        f"    task: (string) the description of that step,\n"
+        f"    duration_hours: (number) hours (can be decimal) for that step.\n\n"
+        f"User’s proficiency level: \"{level}\"\n"
+        f"Deadline: {deadline}\n"
         f"Goal: {goal}\n\n"
-        f"Respond ONLY with valid JSON. Do NOT include any additional commentary or markdown."
+        f"Respond **ONLY** with valid JSON, with no extra text or markdown."
     )
 
+    # ── 4) CALL OPENAI ────────────────────────────────────────────────────────────
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a JSON‐output specialist."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             temperature=0.7,
-            max_tokens=totalTasks * 50  # enough tokens for description + duration
+            max_tokens=days_left * 80  # adjust to allow enough tokens for X steps
         )
+        raw = response.choices[0].message.content.strip()
     except Exception:
-        # On OpenAI error, return a fallback: totalTasks items with generic placeholders
-        return [
-            {"id": i + 1, "task": f"(Step {i + 1} placeholder)", "duration_hours": 1.0}
-            for i in range(totalTasks)
-        ]
+        # If the API call fails for any reason:
+        raw = None
 
-    raw = response.choices[0].message.content.strip()
+    # ── 5) PARSE JSON OR FALL BACK ────────────────────────────────────────────────
+    if raw:
+        try:
+            data = json.loads(raw)
+            tasks: List[Dict] = []
+            for i, obj in enumerate(data, start=1):
+                desc = obj.get("task", "").strip()
+                dur = float(obj.get("duration_hours", 1.0))
+                tasks.append({"id": i, "task": desc, "duration_hours": dur})
+            # If the model for some reason returned fewer than 1 element, pad:
+            if len(tasks) == 0:
+                raise ValueError("No tasks returned")
+            return tasks
+        except Exception:
+            # Fall thru to placeholder
+            pass
 
-    # Attempt to parse the raw JSON array
-    try:
-        data = json.loads(raw)
-        tasks: List[Dict] = []
-        for i, obj in enumerate(data, start=1):
-            task_desc = obj.get("task", "").strip()
-            dur = float(obj.get("duration_hours", 1.0))
-            tasks.append({"id": i, "task": task_desc, "duration_hours": dur})
-        # If the model returned fewer/more than totalTasks, truncate or pad:
-        if len(tasks) < totalTasks:
-            # pad with placeholders
-            for j in range(len(tasks), totalTasks):
-                tasks.append({
-                    "id": j + 1,
-                    "task": f"(Step {j + 1} placeholder)",
-                    "duration_hours": 1.0
-                })
-        elif len(tasks) > totalTasks:
-            tasks = tasks[:totalTasks]
-        return tasks
-    except Exception:
-        # If parsing fails, fall back to generic placeholders
-        return [
-            {"id": i + 1, "task": f"(Step {i + 1} placeholder)", "duration_hours": 1.0}
-            for i in range(totalTasks)
-        ]
+    # ── 6) FALLBACK: GENERIC PLACEHOLDERS ────────────────────────────────────────
+    # If we get here, parsing failed or raw==None.
+    # Return one placeholder per day_left (or at least 1)
+    fallback_count = max(days_left, 1)
+    return [
+        {"id": i + 1, "task": f"(Step {i + 1} placeholder)", "duration_hours": 1.0}
+        for i in range(fallback_count)
+    ]
