@@ -190,20 +190,29 @@ def api_tasks():
 # ── 13) ROUTE: SCHEDULE INTO GOOGLE CALENDAR ─────────────────────────────────────
 @app.route("/api/schedule", methods=["POST"])
 def api_schedule():
-    data = request.get_json(force=True)
-    # ignore settings for now, since schedule_tasks doesn’t take them
-    tasks     = data.get("tasks", [])
-    start_iso = data.get("start_date")
-    deadline  = data.get("deadline")
+    data            = request.get_json(force=True)
+    settings        = data.get("settings", {})
+    max_hours       = settings.get("maxHoursPerDay", None)
+    allowed_weekdays = settings.get("allowedDaysOfWeek", None)
 
-    svc = get_calendar_service()
-    if not svc:
-        return jsonify({"error":"not_authenticated"}), 401
+    service = get_calendar_service()
+    if not service:
+        return jsonify({"error": "not_authenticated"}), 401
+
+    tasks      = data.get("tasks", [])
+    start_iso  = data.get("start_date")
+    deadline   = data.get("deadline")
 
     try:
-        # Only these four parameters; remove max_per_day & allowed_days
-        scheduled, unscheduled = schedule_tasks(svc, tasks, start_iso, deadline)
-        ids = create_calendar_events(svc, scheduled)
+        scheduled, unscheduled = schedule_tasks(
+            service=service,
+            tasks=tasks,
+            start_iso=start_iso,
+            deadline_iso=deadline,
+            max_hours_per_day=max_hours,
+            allowed_days_of_week=allowed_weekdays
+        )
+        ids = create_calendar_events(service, scheduled)
         return jsonify({"eventIds": ids, "unscheduled": unscheduled})
     except Exception as e:
         app.logger.exception("Error in /api/schedule route")
