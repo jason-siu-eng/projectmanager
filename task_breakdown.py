@@ -70,11 +70,22 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
         print(raw)
 
     except Exception as e:
-        # Catch all exceptions (invalid key, network, rate‐limit, etc.)
+        # Catch all exceptions (invalid key, network, rate-limit, etc.)
         print("OpenAI API call failed with exception:", repr(e))
         raw = None
 
-    # ── 6) PARSE JSON OR FALL BACK ────────────────────────────────────────────────
+    # ── 6) STRIP TRIPLE-BACKTICK FENCES (IF ANY) ─────────────────────────────────
+    if raw and raw.startswith("```"):
+        # Remove the opening fence line (e.g. "```json\n")
+        idx = raw.find("\n")
+        if idx != -1:
+            raw = raw[idx + 1 :]
+
+        # If there's a trailing ``` at the end, strip it off
+        if raw.strip().endswith("```"):
+            raw = raw.rsplit("```", 1)[0].strip()
+
+    # ── 7) PARSE JSON OR FALL BACK ────────────────────────────────────────────────
     if raw:
         try:
             data = json.loads(raw)
@@ -93,7 +104,7 @@ def breakdown_goal(goal: str, level: str, deadline: str) -> List[Dict]:
             print("JSON parse failed. raw was:", raw)
             print("Parsing exception:", repr(parse_err))
 
-    # ── 7) FALLBACK: GENERIC PLACEHOLDERS ────────────────────────────────────────
+    # ── 8) FALLBACK: GENERIC PLACEHOLDERS ────────────────────────────────────────
     print("FALLING BACK to placeholders")
     fallback_count = max(days_left, 1)
     return [
