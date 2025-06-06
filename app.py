@@ -259,33 +259,36 @@ def api_tasks():
 @app.route("/api/schedule", methods=["POST"])
 def api_schedule():
     data = request.get_json(force=True)
-    settings = data.get("settings", {})
-    max_per_day = settings.get("maxHoursPerDay", None)
-    allowed_days = settings.get("allowedDaysOfWeek", None)
+    settings          = data.get("settings", {})
+    max_hours_per_day = settings.get("maxHoursPerDay", None)
+    allowed_days      = settings.get("allowedDaysOfWeek", None)
 
     service = get_calendar_service()
     if not service:
         return jsonify({"error": "not_authenticated"}), 401
 
-    tasks = data.get("tasks", [])
-    start_iso = data.get("start_date")
-    deadline = data.get("deadline")
+    tasks      = data.get("tasks", [])
+    start_iso  = data.get("start_date")
+    deadline   = data.get("deadline")
 
     try:
-        # Notice: `schedule_tasks` must accept max_per_day and allowed_days
         scheduled, unscheduled = schedule_tasks(
             service,
             tasks,
             start_iso,
             deadline,
-            max_per_day=max_per_day,
-            allowed_days=allowed_days
+            max_hours_per_day=max_hours_per_day,
+            allowed_days_of_week=allowed_days
         )
         ids = create_calendar_events(service, scheduled)
-        return jsonify({"eventIds": ids, "unscheduled": unscheduled})
+        return jsonify({
+            "eventIds":    ids,
+            "unscheduled": unscheduled
+        })
     except Exception as e:
         app.logger.exception("Error in /api/schedule route")
         return jsonify({"error": "schedule_failed", "message": str(e)}), 500
+
 
 
 # ── 15) RUN APP (for local debugging) ───────────────────────────────────────────
