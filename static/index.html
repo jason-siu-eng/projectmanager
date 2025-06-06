@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Task Scheduler</title>
 
-  <!-- FullCalendar CSS -->
+  <!-- FullCalendar CSS (includes timeGrid & dayGrid) -->
   <link
     href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css"
     rel="stylesheet"
@@ -101,11 +101,10 @@
 
     /* 6. Calendar container */
     #calendar {
-      margin-top: 2rem;
-      max-width: 900px;
-      margin-left: auto;
-      margin-right: auto;
-    }
+  margin-top: 2rem;
+  min-height: 700px; /* or whatever minimum you prefer */
+}
+
 
     /* 7. FullCalendar button tweaks */
     .fc .fc-button {
@@ -270,16 +269,28 @@
         <input type="text" id="goalInput" required/>
       </div>
       <div class="form-group">
-        <label for="levelSelect">Proficiency level</label>
-        <select id="levelSelect">
-          <option value="easy">Easy</option>
-          <option value="medium" selected>Medium</option>
-          <option value="hard">Hard</option>
+        <label for="currentLevel">Current Proficiency Level</label>
+        <select id="currentLevel">
+          <option value="beginner">Beginner</option>
+          <option value="intermediate" selected>Intermediate</option>
+          <option value="expert">Expert</option>
         </select>
       </div>
       <div class="form-group">
+        <label for="targetLevel">Desired Proficiency Level</label>
+        <select id="targetLevel">
+          <option value="beginner">Beginner</option>
+          <option value="intermediate">Intermediate</option>
+          <option value="expert" selected>Expert</option>
+        </select>
+      </div>      
+      <div class="form-group">
         <label for="deadlineInput">Deadline (YYYY-MM-DD)</label>
         <input type="date" id="deadlineInput" required/>
+      </div>
+      <div class="form-group">
+        <label for="overrideTaskCount">Total steps (optional)</label>
+        <input type="number" id="overrideTaskCount" min="1" placeholder="e.g. 8" />
       </div>
       <button type="submit">Generate Tasks</button>
     </form>
@@ -297,7 +308,7 @@
       <!-- Max hours per day -->
       <div class="form-group">
         <label for="maxHoursPerDay">Max hours/day</label>
-        <input type="number" id="maxHoursPerDay" min="1" value="8"/>
+        <input type="number" id="maxHoursPerDay" min="1" value="2"/>
       </div>
       <!-- Allowed days of week -->
       <div class="form-group days">
@@ -313,44 +324,37 @@
     </div>
   </div>
 
-  <!-- FullCalendar JS -->
+  <!-- FullCalendar JS (includes timeGrid plugin) -->
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // ─── FullCalendar TIME‐GRID initialization ───────────────
+      // ─── FullCalendar initialization using timeGridWeek ───────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
-        // 1) Show a 7‐day horizontal time grid, with vertical time axis:
-        initialView: 'timeGridWeek',
+  initialView: 'timeGridWeek',
+  headerToolbar: {
+    left: 'prev,today,next',
+    center: 'title',
+    right: 'timeGridWeek,timeGridDay'
+  },
+  editable: false,
+  selectable: false,
 
-        // 2) Toolbar at top: Prev | Today | Next   Title   timeGridWeek, timeGridDay
-        headerToolbar: {
-          left: 'prev today next',
-          center: 'title',
-          right: 'timeGridWeek timeGridDay'
-        },
+  // ★ Make each time‐slot row equal in height and fill the container:
+  expandRows: true,        // Forces all visible rows to have the same height
+  height: 'auto',          // Let the calendar size itself based on container width
 
-        // 3) Do NOT show the “all‐day” slot row:
-        allDaySlot: false,
+  // ★ Slot range and granularity:
+  slotMinTime: '06:00:00',
+  slotMaxTime: '20:00:00',
+  slotDuration: '01:00:00',
+  slotLabelInterval: '01:00:00',
+});
 
-        // 4) Only show slots from 6:00 AM through 10:00 PM:
-        slotMinTime: '06:00:00',
-        slotMaxTime: '22:00:00',
-
-        // 5) Show a thin “current time” marker line:
-        nowIndicator: true,
-
-        // 6) Make events non‐editable (for now):
-        editable: false,
-        selectable: false,
-
-        // 7) Set a consistent height so it looks like a “daily planner”:
-        height: 'auto'
-      });
       calendar.render();
 
-      // ─── Google Sync (timeGrid) ────────────────────────────────
+      // ─── Google Sync ────────────────────────────────
       const syncBtn    = document.getElementById('syncBtn');
       const syncStatus = document.getElementById('syncStatus');
       async function syncGoogleEvents() {
@@ -358,18 +362,12 @@
         try {
           const resp = await fetch('/api/events', { credentials: 'include' });
           if (resp.status === 401) {
-            // not authenticated → redirect to /login
             window.location.href = '/login';
             return;
           }
           const { events } = await resp.json();
-
-          // 1) Remove all existing events:
           calendar.removeAllEvents();
-
-          // 2) Add new events in “timeGrid” format:
           calendar.addEventSource(events);
-
           syncStatus.textContent = 'Synced';
         } catch (err) {
           console.error('Sync error', err);
@@ -377,6 +375,55 @@
         }
       }
       syncBtn.addEventListener('click', syncGoogleEvents);
+
+      // ─── Helper: wire up "＋" and "－" to add/remove entire <li> rows ─────
+      function wireUpAddRemoveButtons() {
+        document.querySelectorAll('.task-plus').forEach(btn => {
+          btn.onclick = () => {
+            const currentLi = btn.closest('li');
+            const ol = currentLi.parentElement;
+            const allLis = Array.from(ol.querySelectorAll('li'));
+            const index = allLis.indexOf(currentLi);
+            // Create a new blank <li>
+            const newLi = document.createElement('li');
+            newLi.innerHTML = `
+              <div class="task-number">0.</div>
+              <input type="text" class="task-input" value="" placeholder="New task…" />
+              <input
+                type="number"
+                class="task-duration"
+                value="1"
+                min="0.5"
+                step="0.5"
+              />
+              <span class="task-plus">＋</span>
+              <span class="task-minus">－</span>
+            `;
+            // Insert after the current one
+            ol.insertBefore(newLi, allLis[index + 1] || null);
+            // Re-number everything
+            Array.from(ol.querySelectorAll('li')).forEach((li, idx) => {
+              li.querySelector('.task-number').textContent = (idx + 1) + '.';
+            });
+            // Re-wire clicks (including on newly inserted row)
+            wireUpAddRemoveButtons();
+          };
+        });
+
+        document.querySelectorAll('.task-minus').forEach(btn => {
+          btn.onclick = () => {
+            const currentLi = btn.closest('li');
+            const ol = currentLi.parentElement;
+            const totalItems = ol.querySelectorAll('li').length;
+            if (totalItems <= 1) return; // don’t delete last row
+            currentLi.remove();
+            Array.from(ol.querySelectorAll('li')).forEach((li, idx) => {
+              li.querySelector('.task-number').textContent = (idx + 1) + '.';
+            });
+            wireUpAddRemoveButtons();
+          };
+        });
+      }
 
       // ─── Task Generation ────────────────────────────
       const form       = document.getElementById('goalForm');
@@ -390,16 +437,26 @@
         outlineDiv.innerHTML = '<p>Loading tasks…</p>';
         addBtn.style.display = 'none';
 
-        const goal     = document.getElementById('goalInput').value;
-        const level    = document.getElementById('levelSelect').value;
-        const deadline = document.getElementById('deadlineInput').value;
+        const goal            = document.getElementById('goalInput').value;
+        const currentLevel    = document.getElementById('currentLevel').value;
+        const targetLevel     = document.getElementById('targetLevel').value;
+        const deadline        = document.getElementById('deadlineInput').value;
+        const overrideStr     = document.getElementById('overrideTaskCount').value;
+        const overrideInt     = overrideStr ? parseInt(overrideStr, 10) : null;
         lastDeadline = deadline;
 
+        // Fetch from /api/tasks
         const resp = await fetch('/api/tasks', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ goal, level, deadline })
+          body: JSON.stringify({
+            goal,
+            currentLevel,
+            targetLevel,
+            deadline,
+            overrideTaskCount: overrideInt
+          })
         });
         const { tasks } = await resp.json();
         lastTasks = tasks || [];
@@ -431,31 +488,14 @@
               step="0.5"
             />
             <span class="task-plus">＋</span>
-            <span class="task-minus">—</span>
+            <span class="task-minus">－</span>
           `;
           ol.appendChild(li);
         });
         outlineDiv.appendChild(ol);
 
-        // ─── Wire up + / − buttons ─────────────────
-        document.querySelectorAll('.task-plus').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const durationInput = btn.previousElementSibling;
-            let curr = parseFloat(durationInput.value) || 0;
-            curr += 0.5;
-            durationInput.value = curr.toFixed(1);
-          });
-        });
-        document.querySelectorAll('.task-minus').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const durationInput = btn.previousElementSibling.previousElementSibling;
-            let curr = parseFloat(durationInput.value) || 0;
-            if (curr > 0.5) {
-              curr -= 0.5;
-              durationInput.value = curr.toFixed(1);
-            }
-          });
-        });
+        // ─── Wire up + / − buttons to add/remove rows ───
+        wireUpAddRemoveButtons();
 
         // ─── Reveal "Add to Calendar" ──────────────
         addBtn.style.display = 'block';
