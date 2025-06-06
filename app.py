@@ -49,7 +49,7 @@ app.secret_key = FLASK_SECRET_KEY
 CORS(app, supports_credentials=True)
 
 # ── 6) IMPORT PROJECT LOGIC ────────────────────────────────────────────────────
-from task_breakdown import ask_complexity_score, breakdown_goal
+from task_breakdown import breakdown_goal
 from calendar_integration import schedule_tasks, create_calendar_events
 
 
@@ -206,7 +206,7 @@ def decide_total_tasks(goal: str, level: str, deadline: str, override: int = Non
     # 4) If OPENAI_API_KEY is present, ask for complexity score
     if OPENAI_API_KEY:
         try:
-            complexity = ask_complexity_score(goal, level, deadline)
+            complexity = (goal, level, deadline)
             # Adjustment = round(complexity_score / 3).  e.g. if complexity=8, adjustment ~ 3
             adjustment = round(complexity / 3)
             total = base_count + adjustment
