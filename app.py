@@ -196,12 +196,13 @@ def decide_total_tasks(goal: str, level: str, deadline: str, override: int = Non
 # ──13) API: GENERATE TASKS ──────────────────────────────────────────────────────
 @app.route("/api/tasks", methods=["POST"])
 def api_tasks():
-    data      = request.get_json(force=True)
-    goal      = data.get("goal", "").strip()
-    current   = data.get("currentLevel", "").strip() or "easy"
-    target    = data.get("targetLevel", "").strip() 
-    deadline  = data.get("deadline", "").strip()
-    override  = data.get("overrideTaskCount", None)
+    goal          = data.get("goal", "").trim()
+    current_level = data.get("currentLevel", "easy").trim()
+    target_level  = data.get("targetLevel", "expert").trim()
+    deadline      = data.get("deadline", "").trim()
+
+    # Now pass both current & target into your breaker
+    tasks = breakdown_goal(goal, current_level, target_level, deadline)
 
     # decide how many steps
     total = decide_total_tasks(goal, current, deadline, override)
