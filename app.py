@@ -196,40 +196,35 @@ def decide_total_tasks(goal: str, level: str, deadline: str, override: int = Non
 # ──13) API: GENERATE TASKS ──────────────────────────────────────────────────────
 @app.route("/api/tasks", methods=["POST"])
 def api_tasks():
-    goal          = data.get("goal", "").trim()
-    current_level = data.get("currentLevel", "easy").trim()
-    target_level  = data.get("targetLevel", "expert").trim()
-    deadline      = data.get("deadline", "").trim()
+    # 1) Load the JSON payload
+    data = request.get_json(force=True)
 
-    # Now pass both current & target into your breaker
-    tasks = breakdown_goal(goal, current_level, target_level, deadline)
+    # 2) Pull out all of our inputs, using Python’s .strip()
+    goal           = data.get("goal", "").strip()
+    current_level  = data.get("currentLevel", "").strip()
+    target_level   = data.get("targetLevel", "").strip()
+    deadline       = data.get("deadline", "").strip()
+    # (If you have an override, you can grab it here too)
+    # override = data.get("overrideTaskCount", None)
 
-    # decide how many steps
-    total = decide_total_tasks(goal, current, deadline, override)
-
-    # pass all four into breakdown_goal
-    try:
-        tasks = breakdown_goal(goal, current, target, deadline)
-    except Exception as e:
-        app.logger.exception("Error in breakdown_goal")
-        # fallback to placeholders if needed
-        tasks = [
+    # 3) Fallback to placeholders if no OPENAI key
+    if not OPENAI_API_KEY:
+        placeholder = [
             {"id": i+1, "task": f"(Step {i+1} placeholder)", "duration_hours": 1.0}
-            for i in range(total)
+            for i in range(max((datetime.fromisoformat(deadline).date() - datetime.utcnow().date()).days, 1))
         ]
+        return jsonify({"tasks": placeholder})
 
-    # ensure exactly `total` items
-    if len(tasks) < total:
-        for i in range(len(tasks), total):
-            tasks.append({
-                "id": i+1,
-                "task": f"(Step {i+1} placeholder)",
-                "duration_hours": 1.0
-            })
-    elif len(tasks) > total:
-        tasks = tasks[:total]
+    # 4) Generate
+    try:
+        tasks = breakdown_goal(goal, current_level, target_level, deadline)
+        for t in tasks:
+            t.setdefault("duration_hours", 1.0)
+        return jsonify({"tasks": tasks})
+    except Exception as e:
+        app.logger.exception("Error in /api/tasks")
+        return jsonify({"error": "task_generation_failed", "message": str(e)}), 500
 
-    return jsonify({"tasks": tasks})
 
 # ──14) API: SCHEDULE INTO GOOGLE CALENDAR ───────────────────────────────────────
 @app.route("/api/schedule", methods=["POST"])
