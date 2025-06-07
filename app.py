@@ -1,5 +1,3 @@
-# app.py
-
 import os
 import json
 from datetime import datetime
@@ -8,9 +6,9 @@ from flask_cors import CORS
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
+from dotenv import load_dotenv
 
 # ── 1) LOAD ENVIRONMENT ────────────────────────────────────────────────────────
 load_dotenv()
@@ -36,9 +34,9 @@ else:
 # ── 3) VERIFY REQUIRED SECRETS ─────────────────────────────────────────────────
 if not FLASK_SECRET_KEY:
     raise RuntimeError("You must set FLASK_SECRET_KEY in your environment")
-# Note: OPENAI_API_KEY is optional—if missing, we will skip AI calls and use placeholders.
 if not REDIRECT_URI:
     raise RuntimeError("You must set REDIRECT_URI in your env to your OAuth callback")
+# Note: OPENAI_API_KEY is optional—if missing, /api/tasks will fall back.
 
 # ── 4) OAUTH SETTINGS ──────────────────────────────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -51,7 +49,6 @@ CORS(app, supports_credentials=True)
 # ── 6) IMPORT PROJECT LOGIC ────────────────────────────────────────────────────
 from task_breakdown import breakdown_goal
 from calendar_integration import schedule_tasks, create_calendar_events
-
 
 # ── 7) HELPER: BUILD & REFRESH GOOGLE CALENDAR SERVICE ──────────────────────────
 def get_calendar_service():
@@ -85,14 +82,12 @@ def get_calendar_service():
 
     return build("calendar", "v3", credentials=creds)
 
-
-# ── 8) ROUTE: SERVE FRONT‐END STATIC INDEX.HTML ───────────────────────────────────
+# ── 8) ROUTE: FRONT-END ─────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
 
-
-# ── 9) ROUTE: LOGIN → REDIRECT TO GOOGLE OAUTH CONSENT ────────────────────────────
+# ── 9) LOGIN → GOOGLE OAUTH ────────────────────────────────────────────────────
 @app.route("/login")
 def login():
     try:
@@ -106,11 +101,10 @@ def login():
         session["state"] = state
         return redirect(auth_url)
     except Exception as e:
-        app.logger.exception("Error in /login route")
+        app.logger.exception("Error in /login")
         return jsonify({"error": "login_failed", "message": str(e)}), 500
 
-
-# ── 10) ROUTE: GOOGLE CALLBACK ───────────────────────────────────────────────────
+# ──10) OAUTH2 CALLBACK ──────────────────────────────────────────────────────────
 @app.route("/oauth2callback")
 def oauth2callback():
     try:
@@ -136,20 +130,18 @@ def oauth2callback():
         }
         return redirect(url_for("index"))
     except Exception as e:
-        app.logger.exception("Error in /oauth2callback route")
+        app.logger.exception("Error in /oauth2callback")
         return jsonify({"error": "oauth_callback_failed", "message": str(e)}), 500
 
-
-# ── 11) ROUTE: RETURN UPCOMING CALENDAR EVENTS ────────────────────────────────────
+# ──11) API: FETCH EVENTS ────────────────────────────────────────────────────────
 @app.route("/api/events")
 def api_events():
     service = get_calendar_service()
     if not service:
         return jsonify({"error": "not_authenticated"}), 401
 
-    # 1) Pull the color palette once
+    # fetch Google color map
     colors_def = service.colors().get().execute().get("event", {})
-
     now = datetime.utcnow().isoformat() + "Z"
     items = service.events().list(
         calendarId="primary",
@@ -164,112 +156,74 @@ def api_events():
         ed = e["end"].get("dateTime")
         if not (sd and ed):
             continue
-
-        # look up the background/foreground
-        bg, fg = None, None
         cid = e.get("colorId")
-        if cid and cid in colors_def:
-            bg = colors_def[cid]["background"]
-            fg = colors_def[cid]["foreground"]
+        bg = colors_def.get(cid, {}).get("background") if cid else None
+        fg = colors_def.get(cid, {}).get("foreground") if cid else None
 
         events.append({
-            "title":       e.get("summary", "(No title)"),
-            "start":       sd,
-            "end":         ed,
-            # these three are new:
-            "color":       bg,      # FullCalendar will use this for bg+border
-            "textColor":   fg,      # FullCalendar uses this for the text
-            # optionally pass through the raw Google colorId:
+            "title":     e.get("summary", "(No title)"),
+            "start":     sd,
+            "end":       ed,
+            "color":     bg,
+            "textColor": fg,
             "googleColor": cid
         })
 
     return jsonify({"events": events})
 
-
-
-# ── 12) HELPER: DECIDE TOTAL TASKS (TASK COUNT STACK) ────────────────────────────
+# ──12) HELPER: DECIDE TOTAL TASKS ───────────────────────────────────────────────
 def decide_total_tasks(goal: str, level: str, deadline: str, override: int = None) -> int:
-    """
-    1) Compute days_left
-    2) Baseline: 1 task/day × proficiency_multiplier
-    3) If override is provided, return override
-    4) Otherwise, optionally ask OpenAI for complexity score 1–10, adjust
-    5) If anything fails, fallback to “pile of days_left” (or days_left*0.8 if easy)
-    """
-    # 1) Compute days_left
+    # compute days_left
     try:
-        today = datetime.utcnow().date()
+        today   = datetime.utcnow().date()
         dl_date = datetime.fromisoformat(deadline).date()
         days_left = max((dl_date - today).days, 1)
     except Exception:
         days_left = 7
-
-    # 2) Baseline by proficiency
+    # baseline by proficiency
     prof_map = {"easy": 0.8, "medium": 1.0, "hard": 1.2}
     prof_mult = prof_map.get(level.lower(), 1.0)
     base_count = int(round(days_left * prof_mult))
-
-    # 3) Honor user override if supplied and ≥1
-    if override is not None:
-        try:
-            override_int = int(override)
-            if override_int >= 1:
-                return override_int
-        except ValueError:
-            pass  # ignore invalid override
-
-    # 4) If OPENAI_API_KEY is present, ask for complexity score
-    if OPENAI_API_KEY:
-        try:
-            complexity = (goal, level, deadline)
-            # Adjustment = round(complexity_score / 3).  e.g. if complexity=8, adjustment ~ 3
-            adjustment = round(complexity / 3)
-            total = base_count + adjustment
-            return max(total, 1)
-        except Exception:
-            # If something goes wrong with complexity call, fall back below
-            pass
-
-    # 5) Fallback: if “easy,” generate days_left * 0.8 (rounded), else days_left
+    # honor override
+    if override is not None and override >= 1:
+        return override
+    # (optional) complexity adjustment omitted / falls through
+    # fallback
     if level.lower() == "easy":
-        fallback_count = int(round(days_left * 0.8))
-        return max(fallback_count, 1)
-    else:
-        return max(days_left, 1)
+        return max(int(round(days_left * 0.8)), 1)
+    return max(days_left, 1)
 
+# ──13) API: GENERATE TASKS ──────────────────────────────────────────────────────
+@app.route("/api/tasks", methods=["POST"])
+def api_tasks():
+    data     = request.get_json(force=True)
+    goal     = data.get("goal", "").strip()
+    level    = data.get("level", "easy").strip()
+    deadline = data.get("deadline", "").strip()
+    override = data.get("overrideTaskCount", None)
 
-# ── 13) ROUTE: GENERATE TASKS VIA OPENAI ─────────────────────────────────────────
-# in app.py, /api/schedule handler
+    total = decide_total_tasks(goal, level, deadline, override)
+
+    # call breakdown_goal (which uses OpenAI or falls back)
+    tasks = breakdown_goal(goal, level, deadline)
+    # ensure correct length
+    if len(tasks) != total:
+        # simple padding/truncation
+        tasks = tasks[:total] + [
+            {"id": i+1, "task": f"(Step {i+1}) placeholder", "duration_hours": 1.0}
+            for i in range(len(tasks), total)
+        ]
+    return jsonify({"tasks": tasks})
+
+# ──14) API: SCHEDULE INTO GOOGLE CALENDAR ───────────────────────────────────────
 @app.route("/api/schedule", methods=["POST"])
 def api_schedule():
-    data = request.get_json(force=True)
-    settings         = data.get("settings", {})
-    max_hours        = settings.get("maxHoursPerDay")          # e.g. 8
-    allowed_days     = settings.get("allowedDaysOfWeek")       # e.g. ["MO","TU",…]
-    svc = get_calendar_service()
-    if not svc:
-        return jsonify({"error": "not_authenticated"}), 401
+    data     = request.get_json(force=True)
+    settings = data.get("settings", {})
+    max_hours = settings.get("maxHoursPerDay", None)
+    allowed   = settings.get("allowedDaysOfWeek", None)
 
-    scheduled, unscheduled = schedule_tasks(
-        svc,
-        data.get("tasks", []),
-        data.get("start_date"),
-        data.get("deadline"),
-        max_hours_per_day   = max_hours,
-        allowed_days_of_week= allowed_days
-    )
-    ids = create_calendar_events(svc, scheduled)
-    return jsonify({ "eventIds": ids, "unscheduled": unscheduled })
-
-# ── 14) ROUTE: SCHEDULE INTO GOOGLE CALENDAR ─────────────────────────────────────
-@app.route("/api/schedule", methods=["POST"])
-def api_schedule():
-    data = request.get_json(force=True)
-    settings          = data.get("settings", {})
-    max_hours_per_day = settings.get("maxHoursPerDay", None)
-    allowed_days      = settings.get("allowedDaysOfWeek", None)
-
-    service = get_calendar_service()
+    service   = get_calendar_service()
     if not service:
         return jsonify({"error": "not_authenticated"}), 401
 
@@ -283,21 +237,19 @@ def api_schedule():
             tasks,
             start_iso,
             deadline,
-            max_hours_per_day=max_hours_per_day,
-            allowed_days_of_week=allowed_days
+            max_hours_per_day   = max_hours,
+            allowed_days_of_week= allowed
         )
         ids = create_calendar_events(service, scheduled)
         return jsonify({
-         "eventIds":    ids,
-        "scheduled":   scheduled,    # add this
-        "unscheduled": unscheduled
-      })
+            "eventIds":    ids,
+            "scheduled":   scheduled,
+            "unscheduled": unscheduled
+        })
     except Exception as e:
-        app.logger.exception("Error in /api/schedule route")
+        app.logger.exception("Error in /api/schedule")
         return jsonify({"error": "schedule_failed", "message": str(e)}), 500
 
-
-
-# ── 15) RUN APP (for local debugging) ───────────────────────────────────────────
+# ──15) RUN APP FOR LOCAL DEBUG ─────────────────────────────────────────────────
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
