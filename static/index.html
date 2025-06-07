@@ -16,9 +16,7 @@
 
   <style>
     /* 1. Box‐sizing so width:100% includes padding/border */
-    *, *::before, *::after {
-      box-sizing: border-box;
-    }
+    *, *::before, *::after { box-sizing: border-box; }
 
     body {
       font-family: Arial, sans-serif;
@@ -101,10 +99,9 @@
 
     /* 6. Calendar container */
     #calendar {
-  margin-top: 2rem;
-  min-height: 700px; /* or whatever minimum you prefer */
-}
-
+      margin-top: 2rem;
+      min-height: 700px; /* or whatever minimum you prefer */
+    }
 
     /* 7. FullCalendar button tweaks */
     .fc .fc-button {
@@ -332,113 +329,89 @@
       // ─── FullCalendar initialization using timeGridWeek ───────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
-  initialView: 'dayGridWeek',
-  headerToolbar: {
-    left: 'prev,today,next',
-    center: 'title',
-    right: 'dayGridWeek,dayGridDay'
-  },
-  editable: false,
-  selectable: false,
+        initialView: 'timeGridWeek',
+        headerToolbar: {
+          left: 'prev,today,next',
+          center: 'title',
+          right: 'timeGridWeek,timeGridDay'
+        },
+        slotMinTime: '06:00:00',
+        slotMaxTime: '20:00:00',
+        allDaySlot: true,   // preserve your all-day row
+        selectable: false,
+        editable: false,
 
-  eventDidMount(info) {
-    // grab the title element that FullCalendar just rendered
-    let titleEl = info.el.querySelector('.fc-event-title');
-    if (!titleEl) return;
-
-    // measure how much room you have vs how much text you have
-    const maxWidth = titleEl.offsetWidth;
-    const text    = titleEl.textContent.trim();
-
-    // start at your default font-size
-    let fontSize = 14; 
-    titleEl.style.fontSize = fontSize + 'px';
-
-    // if it overflows, keep reducing by 1px until it fits or floor at 8px
-    while ((titleEl.scrollWidth > maxWidth) && fontSize > 8) {
-      fontSize -= 1;
-      titleEl.style.fontSize = fontSize + 'px';
-    }
-  }
-});
-
-calendar.render();
+        eventDidMount(info) {
+          // dynamically shrink long titles
+          const titleEl = info.el.querySelector('.fc-event-title');
+          if (!titleEl) return;
+          let fs = 14; 
+          titleEl.style.fontSize = fs + 'px';
+          const maxW = titleEl.offsetWidth;
+          while (titleEl.scrollWidth > maxW && fs > 8) {
+            fs -= 1;
+            titleEl.style.fontSize = fs + 'px';
+          }
+        }
+      });
+      calendar.render();
 
       // ─── Google Sync ────────────────────────────────
       const syncBtn    = document.getElementById('syncBtn');
       const syncStatus = document.getElementById('syncStatus');
       async function syncGoogleEvents() {
-  syncStatus.textContent = 'Syncing…';
-  try {
-    const resp = await fetch('/api/events', { credentials: 'include' });
-    if (resp.status === 401) {
-      window.location.href = '/login';
-      return;
-    }
-    const { events } = await resp.json();
-
-    // 1) Remove every prior source (so we never double‐up)
-    calendar.getEventSources().forEach(src => src.remove());
-
-    // 2) Now add exactly one
-    calendar.addEventSource(events);
-
-    syncStatus.textContent = 'Synced';
-  } catch (err) {
-    console.error('Sync error', err);
-    syncStatus.textContent = 'Sync failed';
-  }
-}
-
+        syncStatus.textContent = 'Syncing…';
+        try {
+          const resp = await fetch('/api/events', { credentials: 'include' });
+          if (resp.status === 401) {
+            window.location.href = '/login';
+            return;
+          }
+          const { events } = await resp.json();
+          calendar.getEventSources().forEach(src => src.remove());
+          calendar.addEventSource(events);
+          syncStatus.textContent = 'Synced';
+        } catch (err) {
+          console.error('Sync error', err);
+          syncStatus.textContent = 'Sync failed';
+        }
+      }
       syncBtn.addEventListener('click', syncGoogleEvents);
 
-      // ─── Helper: wire up "＋" and "－" to add/remove entire <li> rows ─────
+      // ─── Helper: wire up "＋"/"－" to add/remove whole rows ─────
       function wireUpAddRemoveButtons() {
         document.querySelectorAll('.task-plus').forEach(btn => {
           btn.onclick = () => {
-            const currentLi = btn.closest('li');
-            const ol = currentLi.parentElement;
-            const allLis = Array.from(ol.querySelectorAll('li'));
-            const index = allLis.indexOf(currentLi);
-            // Create a new blank <li>
+            const li = btn.closest('li');
+            const ol = li.parentElement;
+            const items = Array.from(ol.children);
+            const idx = items.indexOf(li);
             const newLi = document.createElement('li');
             newLi.innerHTML = `
               <div class="task-number">0.</div>
-              <input type="text" class="task-input" value="" placeholder="New task…" />
-              <input
-                type="number"
-                class="task-duration"
-                value="1"
-                min="0.5"
-                step="0.5"
-              />
+              <input type="text" class="task-input" placeholder="New task…" />
+              <input type="number" class="task-duration" value="1" min="0.5" step="0.5" />
               <span class="task-plus">＋</span>
               <span class="task-minus">－</span>
             `;
-            // Insert after the current one
-            ol.insertBefore(newLi, allLis[index + 1] || null);
-            // Re-number everything
-            Array.from(ol.querySelectorAll('li')).forEach((li, idx) => {
-              li.querySelector('.task-number').textContent = (idx + 1) + '.';
-            });
-            // Re-wire clicks (including on newly inserted row)
-            wireUpAddRemoveButtons();
+            ol.insertBefore(newLi, items[idx+1]||null);
+            renumberAndWire();
           };
         });
-
         document.querySelectorAll('.task-minus').forEach(btn => {
           btn.onclick = () => {
-            const currentLi = btn.closest('li');
-            const ol = currentLi.parentElement;
-            const totalItems = ol.querySelectorAll('li').length;
-            if (totalItems <= 1) return; // don’t delete last row
-            currentLi.remove();
-            Array.from(ol.querySelectorAll('li')).forEach((li, idx) => {
-              li.querySelector('.task-number').textContent = (idx + 1) + '.';
-            });
-            wireUpAddRemoveButtons();
+            const li = btn.closest('li');
+            const ol = li.parentElement;
+            if (ol.children.length > 1) li.remove();
+            renumberAndWire();
           };
         });
+      }
+      function renumberAndWire() {
+        document.querySelectorAll('.task-list li').forEach((li,i)=>{
+          li.querySelector('.task-number').textContent = (i+1) + '.';
+        });
+        wireUpAddRemoveButtons();
       }
 
       // ─── Task Generation ────────────────────────────
@@ -458,118 +431,107 @@ calendar.render();
         const targetLevel     = document.getElementById('targetLevel').value;
         const deadline        = document.getElementById('deadlineInput').value;
         const overrideStr     = document.getElementById('overrideTaskCount').value;
-        const overrideInt     = overrideStr ? parseInt(overrideStr, 10) : null;
+        const overrideInt     = overrideStr ? parseInt(overrideStr, 10) : undefined;
         lastDeadline = deadline;
 
-        // Fetch from /api/tasks
         const resp = await fetch('/api/tasks', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-          goal,
-          level: currentLevel,
-          deadline,
-          totalTasks: overrideTaskCount 
+            goal,
+            current_level: currentLevel,
+            target_level: targetLevel,
+            deadline,
+            override: overrideInt
           })
         });
         const { tasks } = await resp.json();
         lastTasks = tasks || [];
 
-        // ─── Build header row ─────────────────────
         outlineDiv.innerHTML = '';
-        const headerRow = document.createElement('div');
-        headerRow.className = 'task-header';
-        headerRow.innerHTML = `
+        // header row
+        const hdr = document.createElement('div');
+        hdr.className = 'task-header';
+        hdr.innerHTML = `
           <div class="task-outline-header">Task Outline</div>
           <div class="duration-header">Duration (hr)</div>
           <div class="action-header">Add Task</div>
         `;
-        outlineDiv.appendChild(headerRow);
+        outlineDiv.appendChild(hdr);
 
-        // ─── Build task list ───────────────────────
+        // list
         const ol = document.createElement('ol');
         ol.className = 'task-list';
         lastTasks.forEach((t, idx) => {
           const li = document.createElement('li');
           li.innerHTML = `
-            <div class="task-number">${idx + 1}.</div>
+            <div class="task-number">${idx+1}.</div>
             <input type="text" class="task-input" value="${t.task.replace(/"/g,'&quot;')}" />
-            <input
-              type="number"
-              class="task-duration"
-              value="${t.duration_hours || 1}"
-              min="0.5"
-              step="0.5"
-            />
+            <input type="number" class="task-duration" value="${t.duration_hours||1}" min="0.5" step="0.5" />
             <span class="task-plus">＋</span>
             <span class="task-minus">－</span>
           `;
           ol.appendChild(li);
         });
         outlineDiv.appendChild(ol);
+        renumberAndWire();
 
-        // ─── Wire up + / − buttons to add/remove rows ───
-        wireUpAddRemoveButtons();
-
-        // ─── Reveal "Add to Calendar" ──────────────
         addBtn.style.display = 'block';
       });
 
       // ─── Add to Calendar ─────────────────────────
       addBtn.addEventListener('click', async () => {
-  addBtn.disabled    = true;
-  addBtn.textContent = 'Adding…';
+        addBtn.disabled    = true;
+        addBtn.textContent = 'Adding…';
 
-  // 1) Push to your backend
-  const resp = await fetch('/api/schedule', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tasks:            lastTasks,
-      start_date:       new Date().toISOString(),
-      deadline:         lastDeadline,
-      settings: {
-        maxHoursPerDay:     parseInt(localStorage.getItem('maxHoursPerDay') || '8', 10),
-        allowedDaysOfWeek:  JSON.parse(localStorage.getItem('allowedDays') || '[]')
-      }
-    })
-  });
-  const data = await resp.json();
+        // update lastTasks from any edits
+        document.querySelectorAll('.task-list li').forEach((li,i) => {
+          lastTasks[i].task = li.querySelector('.task-input').value;
+          lastTasks[i].duration_hours = parseFloat(li.querySelector('.task-duration').value) || 1;
+        });
 
-  if (!resp.ok) {
-    alert("Error scheduling tasks: " + (data.message || data.error));
-    addBtn.disabled    = false;
-    addBtn.textContent = 'Add to Calendar';
-    return;
-  }
+        const resp = await fetch('/api/schedule', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tasks: lastTasks,
+            start_date: new Date().toISOString(),
+            deadline: lastDeadline,
+            settings: {
+              maxHoursPerDay: parseInt(localStorage.getItem('maxHoursPerDay')||'2',10),
+              allowedDaysOfWeek: JSON.parse(localStorage.getItem('allowedDays')||'[]')
+            }
+          })
+        });
+        const data = await resp.json();
 
-  // 2) Clear & re-sync your *existing* Google events
-  await syncGoogleEvents();
+        if (!resp.ok) {
+          alert("Error scheduling tasks: " + (data.message||data.error));
+        } else {
+          await syncGoogleEvents();
+          // overlay your scheduled tasks in bright red
+          if (data.scheduled?.length) {
+            data.scheduled.forEach(ev => {
+              calendar.addEvent({
+                title:     ev.summary,
+                start:     ev.start,
+                end:       ev.end,
+                color:     '#ff0000',
+                textColor: '#ffffff'
+              });
+            });
+          }
+        }
 
-  // 3) Overlay *your* scheduled tasks in RED
-  //    (we assume your /api/schedule now returns a `scheduled` array)
-  if (data.scheduled?.length) {
-    data.scheduled.forEach(ev => {
-      calendar.addEvent({
-        title:     ev.summary,
-        start:     ev.start,
-        end:       ev.end,
-        color:     '#ff0000',  // bright red background & border
-        textColor: '#ffffff'   // white text
+        addBtn.textContent = 'Done!';
+        setTimeout(() => {
+          addBtn.style.display = 'none';
+          addBtn.disabled      = false;
+          addBtn.textContent   = 'Add to Calendar';
+        }, 1500);
       });
-    });
-  }
-
-  // 4) Finish up
-  addBtn.textContent = 'Done!';
-  setTimeout(() => {
-    addBtn.style.display  = 'none';
-    addBtn.disabled       = false;
-    addBtn.textContent    = 'Add to Calendar';
-  }, 1500);
-});
 
       // ─── Settings Popup ────────────────────────────
       const settingsBtn   = document.getElementById('settingsBtn');
@@ -577,34 +539,25 @@ calendar.render();
       const closeSettings = document.getElementById('closeSettings');
       const saveSettings  = document.getElementById('saveSettings');
 
-      settingsBtn.addEventListener('click', () => {
-        settingsModal.style.display = 'flex';
-      });
-      closeSettings.addEventListener('click', () => {
-        settingsModal.style.display = 'none';
-      });
-      window.addEventListener('click', e => {
-        if (e.target === settingsModal) settingsModal.style.display = 'none';
-      });
+      settingsBtn.onclick = () => settingsModal.style.display = 'flex';
+      closeSettings.onclick = () => settingsModal.style.display = 'none';
+      window.onclick = e => { if (e.target === settingsModal) settingsModal.style.display = 'none'; };
 
-      // Persist settings
-      saveSettings.addEventListener('click', () => {
-        const maxHrs = parseInt(document.getElementById('maxHoursPerDay').value, 10);
+      saveSettings.onclick = () => {
+        const maxHrs = parseInt(document.getElementById('maxHoursPerDay').value,10);
         const days   = Array.from(
           document.querySelectorAll('#settingsModal .form-group.days input:checked')
-        ).map(cb => cb.value);
+        ).map(cb=>cb.value);
 
         localStorage.setItem('maxHoursPerDay', maxHrs);
-        localStorage.setItem('allowedDays', JSON.stringify(days));
+        localStorage.setItem('allowedDays',   JSON.stringify(days));
         settingsModal.style.display = 'none';
-      });
+      };
 
-      // Load settings into form
+      // load saved settings
       const storedMax = localStorage.getItem('maxHoursPerDay');
-      if (storedMax) {
-        document.getElementById('maxHoursPerDay').value = storedMax;
-      }
-      const storedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
+      if (storedMax) document.getElementById('maxHoursPerDay').value = storedMax;
+      const storedDays = JSON.parse(localStorage.getItem('allowedDays')||'[]');
       if (storedDays.length) {
         document.querySelectorAll('#settingsModal .form-group.days input')
           .forEach(cb => cb.checked = storedDays.includes(cb.value));
