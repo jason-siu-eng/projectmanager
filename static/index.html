@@ -502,52 +502,69 @@
 
       // ─── Add to Calendar ─────────────────────────
       addBtn.addEventListener('click', async () => {
-        addBtn.disabled = true;
-        addBtn.textContent = 'Adding…';
+  // disable & show loading
+  addBtn.disabled   = true;
+  addBtn.textContent = 'Adding…';
 
-        // Update lastTasks with any user edits
-        const descriptionInputs = outlineDiv.querySelectorAll('.task-input');
-        const durationInputs    = outlineDiv.querySelectorAll('.task-duration');
-        lastTasks.forEach((t, idx) => {
-          t.task = descriptionInputs[idx].value;
-          t.duration_hours = parseFloat(durationInputs[idx].value) || 1;
-        });
+  // 1) Pull any edits the user made back into lastTasks
+  const descriptionInputs = outlineDiv.querySelectorAll('.task-input');
+  const durationInputs    = outlineDiv.querySelectorAll('.task-duration');
+  lastTasks.forEach((t, idx) => {
+    t.task           = descriptionInputs[idx].value;
+    t.duration_hours = parseFloat(durationInputs[idx].value) || 1;
+  });
 
-        // Get "maxHoursPerDay" and "allowedDays" from localStorage
-        const maxPerDay   = parseInt(localStorage.getItem('maxHoursPerDay') || '8', 10);
-        const allowedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
+  // 2) Grab settings from localStorage
+  const maxPerDay   = parseInt(localStorage.getItem('maxHoursPerDay') || '8', 10);
+  const allowedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
 
-        const resp = await fetch('/api/schedule', { /* … */ });
-  const { scheduled, unscheduled } = await resp.json();
-
-  if (!resp.ok) {
-    alert("Error scheduling tasks: " + (data.error||data.message));
-  } else {
-    // 1) Inject each newly scheduled event in red:
-    scheduled.forEach(ev => {
-      calendar.addEvent({
-        title:     ev.summary,
-        start:     ev.start,
-        end:       ev.end,
-        color:     '#ff4d4f',
-        textColor: 'white'
-      });
+  try {
+    // 3) Send to your backend
+    const resp = await fetch('/api/schedule', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tasks:           lastTasks,
+        start_date:      new Date().toISOString(),
+        deadline:        lastDeadline,
+        settings: {
+          maxHoursPerDay:       maxPerDay,
+          allowedDaysOfWeek:    allowedDays
+        }
+      })
     });
 
-    // 2) Alert any unscheduled…
-    if (unscheduled.length) {
-      alert(unscheduled.map(u => `Could not schedule #${u.id}: ${u.task}`).join("\n"));
+    // 4) Surface any HTTP errors
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.message || err.error || resp.statusText);
     }
-  }
-  
-  // 3) Tidy up the button…
-  addBtn.textContent = 'Done!';
-  setTimeout(() => {
-    addBtn.style.display = 'none';
-    addBtn.disabled    = false;
+
+    // 5) Parse & handle results
+    const data = await resp.json();
+    if (data.unscheduled?.length) {
+      const lines = data.unscheduled.map(u =>
+        `Could not schedule task #${u.id}: ${u.task}`
+      );
+      alert(lines.join("\n"));
+    }
+
+    // 6) Refresh calendar display
+    await syncGoogleEvents();
+
+  } catch (err) {
+    console.error('Schedule error:', err);
+    alert('Error scheduling tasks: ' + err.message);
+
+  } finally {
+    // 7) Always re-enable button & restore text
+    addBtn.disabled   = false;
     addBtn.textContent = 'Add to Calendar';
-  }, 1500);
+    // (optionally hide it again after success)
+  }
 });
+
       // ─── Settings Popup ────────────────────────────
       const settingsBtn   = document.getElementById('settingsBtn');
       const settingsModal = document.getElementById('settingsModal');

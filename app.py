@@ -239,36 +239,27 @@ def decide_total_tasks(goal: str, level: str, deadline: str, override: int = Non
 
 
 # ── 13) ROUTE: GENERATE TASKS VIA OPENAI ─────────────────────────────────────────
-@app.route("/api/tasks", methods=["POST"])
-def api_tasks():
+# in app.py, /api/schedule handler
+@app.route("/api/schedule", methods=["POST"])
+def api_schedule():
     data = request.get_json(force=True)
-    goal = data.get("goal", "").strip()
-    level = data.get("level", "easy").strip()
-    deadline = data.get("deadline", "").strip()
-    override = data.get("overrideTaskCount", None)  # optional field from client
+    settings         = data.get("settings", {})
+    max_hours        = settings.get("maxHoursPerDay")          # e.g. 8
+    allowed_days     = settings.get("allowedDaysOfWeek")       # e.g. ["MO","TU",…]
+    svc = get_calendar_service()
+    if not svc:
+        return jsonify({"error": "not_authenticated"}), 401
 
-    # 13.1) If no OPENAI_API_KEY, or missing inputs, fall back to days_left placeholders
-    if not goal or not deadline:
-        return jsonify({"tasks": []})
-
-    # 13.2) Decide how many tasks to create
-    total_tasks = decide_total_tasks(goal, level, deadline, override)
-
-    # 13.3) Call breakdown_goal(goal, level, deadline, total_tasks)
-    try:
-        tasks = breakdown_goal(goal, level, deadline, total_tasks)
-        for t in tasks:
-            t.setdefault("duration_hours", 1.0)
-        return jsonify({"tasks": tasks})
-    except Exception as e:
-        app.logger.exception("Error in /api/tasks route")
-        # If something went wrong, just return placeholders
-        fallback = [
-            {"id": i + 1, "task": f"(Step {i+1} placeholder)", "duration_hours": 1.0}
-            for i in range(total_tasks)
-        ]
-        return jsonify({"tasks": fallback})
-
+    scheduled, unscheduled = schedule_tasks(
+        svc,
+        data.get("tasks", []),
+        data.get("start_date"),
+        data.get("deadline"),
+        max_hours_per_day   = max_hours,
+        allowed_days_of_week= allowed_days
+    )
+    ids = create_calendar_events(svc, scheduled)
+    return jsonify({ "eventIds": ids, "unscheduled": unscheduled })
 
 # ── 14) ROUTE: SCHEDULE INTO GOOGLE CALENDAR ─────────────────────────────────────
 @app.route("/api/schedule", methods=["POST"])
