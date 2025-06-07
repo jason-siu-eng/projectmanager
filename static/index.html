@@ -482,56 +482,51 @@
 
       // ─── Add to Calendar ─────────────────────────
       addBtn.addEventListener('click', async () => {
-        addBtn.disabled    = true;
-        addBtn.textContent = 'Adding…';
+  addBtn.disabled    = true;
+  addBtn.textContent = 'Adding…';
 
-        // update lastTasks from any edits
-        document.querySelectorAll('.task-list li').forEach((li,i) => {
-          lastTasks[i].task = li.querySelector('.task-input').value;
-          lastTasks[i].duration_hours = parseFloat(li.querySelector('.task-duration').value) || 1;
+  // 1) Push to your backend
+  const resp = await fetch('/api/schedule', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tasks:            lastTasks,
+      start_date:       new Date().toISOString(),
+      deadline:         lastDeadline,
+      settings: {
+        maxHoursPerDay:     parseInt(localStorage.getItem('maxHoursPerDay')||'2', 10),
+        allowedDaysOfWeek:  JSON.parse(localStorage.getItem('allowedDays')||'[]')
+      }
+    })
+  });
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    alert("Error scheduling tasks: " + (data.message || data.error));
+  } else {
+    // 2) Directly overlay *only* your newly scheduled events in BRIGHT RED
+    if (data.scheduled?.length) {
+      data.scheduled.forEach(ev => {
+        calendar.addEvent({
+          title:     ev.summary,
+          start:     ev.start,
+          end:       ev.end,
+          color:     '#ff0000',  // bright red background & border
+          textColor: '#ffffff'   // white text
         });
-
-        const resp = await fetch('/api/schedule', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tasks: lastTasks,
-            start_date: new Date().toISOString(),
-            deadline: lastDeadline,
-            settings: {
-              maxHoursPerDay: parseInt(localStorage.getItem('maxHoursPerDay')||'2',10),
-              allowedDaysOfWeek: JSON.parse(localStorage.getItem('allowedDays')||'[]')
-            }
-          })
-        });
-        const data = await resp.json();
-
-        if (!resp.ok) {
-          alert("Error scheduling tasks: " + (data.message||data.error));
-        } else {
-          await syncGoogleEvents();
-          // overlay your scheduled tasks in bright red
-          if (data.scheduled?.length) {
-            data.scheduled.forEach(ev => {
-              calendar.addEvent({
-                title:     ev.summary,
-                start:     ev.start,
-                end:       ev.end,
-                color:     '#ff0000',
-                textColor: '#ffffff'
-              });
-            });
-          }
-        }
-
-        addBtn.textContent = 'Done!';
-        setTimeout(() => {
-          addBtn.style.display = 'none';
-          addBtn.disabled      = false;
-          addBtn.textContent   = 'Add to Calendar';
-        }, 1500);
       });
+    }
+    // (if you want to pull in any other Google-created events, user can hit Sync)
+  }
+
+  addBtn.textContent = 'Done!';
+  setTimeout(() => {
+    addBtn.style.display  = 'none';
+    addBtn.disabled       = false;
+    addBtn.textContent    = 'Add to Calendar';
+  }, 1500);
+});
 
       // ─── Settings Popup ────────────────────────────
       const settingsBtn   = document.getElementById('settingsBtn');
