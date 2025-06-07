@@ -518,42 +518,37 @@
         const maxPerDay   = parseInt(localStorage.getItem('maxHoursPerDay') || '8', 10);
         const allowedDays = JSON.parse(localStorage.getItem('allowedDays') || '[]');
 
-        const resp = await fetch('/api/schedule', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tasks: lastTasks,
-            start_date: new Date().toISOString(),
-            deadline: lastDeadline,
-            settings: {
-              maxHoursPerDay: maxPerDay,
-              allowedDaysOfWeek: allowedDays
-            }
-          })
-        });
-        const data = await resp.json();
+        const resp = await fetch('/api/schedule', { /* … */ });
+  const { scheduled, unscheduled } = await resp.json();
 
-        if (!resp.ok) {
-          alert("Error scheduling tasks: " + (data.message || data.error));
-        } else {
-          if (data.unscheduled?.length) {
-            const lines = data.unscheduled.map(u =>
-              `Could not schedule task #${u.id}: ${u.task}`
-            );
-            alert(lines.join("\n"));
-          }
-          await syncGoogleEvents();
-        }
-
-        addBtn.textContent = 'Done!';
-        setTimeout(() => {
-          addBtn.style.display = 'none';
-          addBtn.disabled = false;
-          addBtn.textContent = 'Add to Calendar';
-        }, 1500);
+  if (!resp.ok) {
+    alert("Error scheduling tasks: " + (data.error||data.message));
+  } else {
+    // 1) Inject each newly scheduled event in red:
+    scheduled.forEach(ev => {
+      calendar.addEvent({
+        title:     ev.summary,
+        start:     ev.start,
+        end:       ev.end,
+        color:     '#ff4d4f',
+        textColor: 'white'
       });
+    });
 
+    // 2) Alert any unscheduled…
+    if (unscheduled.length) {
+      alert(unscheduled.map(u => `Could not schedule #${u.id}: ${u.task}`).join("\n"));
+    }
+  }
+  
+  // 3) Tidy up the button…
+  addBtn.textContent = 'Done!';
+  setTimeout(() => {
+    addBtn.style.display = 'none';
+    addBtn.disabled    = false;
+    addBtn.textContent = 'Add to Calendar';
+  }, 1500);
+});
       // ─── Settings Popup ────────────────────────────
       const settingsBtn   = document.getElementById('settingsBtn');
       const settingsModal = document.getElementById('settingsModal');

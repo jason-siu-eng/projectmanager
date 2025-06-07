@@ -144,32 +144,47 @@ def oauth2callback():
 @app.route("/api/events")
 def api_events():
     service = get_calendar_service()
-    if service is None:
+    if not service:
         return jsonify({"error": "not_authenticated"}), 401
 
-    try:
-        now = datetime.utcnow().isoformat() + "Z"
-        events = []
-        items = (
-            service.events()
-            .list(
-                calendarId="primary",
-                timeMin=now,
-                singleEvents=True,
-                orderBy="startTime"
-            )
-            .execute()
-            .get("items", [])
-        )
-        for e in items:
-            start = e["start"].get("dateTime")
-            end = e["end"].get("dateTime")
-            if start and end:
-                events.append({"title": e.get("summary", "(No title)"), "start": start, "end": end})
-        return jsonify({"events": events})
-    except RefreshError:
-        session.clear()
-        return jsonify({"error": "not_authenticated"}), 401
+    # 1) Pull the color palette once
+    colors_def = service.colors().get().execute().get("event", {})
+
+    now = datetime.utcnow().isoformat() + "Z"
+    items = service.events().list(
+        calendarId="primary",
+        timeMin=now,
+        singleEvents=True,
+        orderBy="startTime"
+    ).execute().get("items", [])
+
+    events = []
+    for e in items:
+        sd = e["start"].get("dateTime")
+        ed = e["end"].get("dateTime")
+        if not (sd and ed):
+            continue
+
+        # look up the background/foreground
+        bg, fg = None, None
+        cid = e.get("colorId")
+        if cid and cid in colors_def:
+            bg = colors_def[cid]["background"]
+            fg = colors_def[cid]["foreground"]
+
+        events.append({
+            "title":       e.get("summary", "(No title)"),
+            "start":       sd,
+            "end":         ed,
+            # these three are new:
+            "color":       bg,      # FullCalendar will use this for bg+border
+            "textColor":   fg,      # FullCalendar uses this for the text
+            # optionally pass through the raw Google colorId:
+            "googleColor": cid
+        })
+
+    return jsonify({"events": events})
+
 
 
 # ── 12) HELPER: DECIDE TOTAL TASKS (TASK COUNT STACK) ────────────────────────────
@@ -282,9 +297,10 @@ def api_schedule():
         )
         ids = create_calendar_events(service, scheduled)
         return jsonify({
-            "eventIds":    ids,
-            "unscheduled": unscheduled
-        })
+         "eventIds":    ids,
+        "scheduled":   scheduled,    # add this
+        "unscheduled": unscheduled
+      })
     except Exception as e:
         app.logger.exception("Error in /api/schedule route")
         return jsonify({"error": "schedule_failed", "message": str(e)}), 500
