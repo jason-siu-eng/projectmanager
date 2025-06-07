@@ -196,23 +196,38 @@ def decide_total_tasks(goal: str, level: str, deadline: str, override: int = Non
 # ──13) API: GENERATE TASKS ──────────────────────────────────────────────────────
 @app.route("/api/tasks", methods=["POST"])
 def api_tasks():
-    data     = request.get_json(force=True)
-    goal     = data.get("goal", "").strip()
-    level    = data.get("level", "easy").strip()
-    deadline = data.get("deadline", "").strip()
-    override = data.get("overrideTaskCount", None)
+    data      = request.get_json(force=True)
+    goal      = data.get("goal", "").strip()
+    current   = data.get("currentLevel", "").strip() or "easy"
+    target    = data.get("targetLevel", "").strip() or current
+    deadline  = data.get("deadline", "").strip()
+    override  = data.get("overrideTaskCount", None)
 
-    total = decide_total_tasks(goal, level, deadline, override)
+    # decide how many steps
+    total = decide_total_tasks(goal, current, deadline, override)
 
-    # call breakdown_goal (which uses OpenAI or falls back)
-    tasks = breakdown_goal(goal, level, deadline)
-    # ensure correct length
-    if len(tasks) != total:
-        # simple padding/truncation
-        tasks = tasks[:total] + [
-            {"id": i+1, "task": f"(Step {i+1}) placeholder", "duration_hours": 1.0}
-            for i in range(len(tasks), total)
+    # pass all four into breakdown_goal
+    try:
+        tasks = breakdown_goal(goal, current, target, deadline)
+    except Exception as e:
+        app.logger.exception("Error in breakdown_goal")
+        # fallback to placeholders if needed
+        tasks = [
+            {"id": i+1, "task": f"(Step {i+1} placeholder)", "duration_hours": 1.0}
+            for i in range(total)
         ]
+
+    # ensure exactly `total` items
+    if len(tasks) < total:
+        for i in range(len(tasks), total):
+            tasks.append({
+                "id": i+1,
+                "task": f"(Step {i+1} placeholder)",
+                "duration_hours": 1.0
+            })
+    elif len(tasks) > total:
+        tasks = tasks[:total]
+
     return jsonify({"tasks": tasks})
 
 # ──14) API: SCHEDULE INTO GOOGLE CALENDAR ───────────────────────────────────────
