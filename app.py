@@ -199,7 +199,7 @@ def api_tasks():
     data      = request.get_json(force=True)
     goal      = data.get("goal", "").strip()
     current   = data.get("currentLevel", "").strip() or "easy"
-    target    = data.get("targetLevel", "").strip() or current
+    target    = data.get("targetLevel", "").strip() 
     deadline  = data.get("deadline", "").strip()
     override  = data.get("overrideTaskCount", None)
 
