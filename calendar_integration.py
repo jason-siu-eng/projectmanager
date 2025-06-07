@@ -1,5 +1,3 @@
-# calendar_integration.py
-
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 from googleapiclient.errors import HttpError
@@ -128,13 +126,9 @@ def schedule_tasks(
                         if (we - ws) >= duration:
                             # We have a candidate: check again that by placing it here,
                             # we are still not exceeding max_hours_per_day on this day.
-                            # (Because some free windows might be long enough, but day-hours already near limit.)
-                            free_span_hours = (we - ws).total_seconds()/3600
-                            # But we only need 'duration' hours, so if already_used + duration <= max_hours_per_day → OK
                             if max_hours_per_day is None or (already_used + duration.total_seconds()/3600) <= max_hours_per_day:
                                 slot = (ws, ws + duration)
                                 break
-                    # end for free_windows
 
             # If we found a slot, break out of the loop
             if slot:

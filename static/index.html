@@ -451,11 +451,10 @@
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            goal,
-            currentLevel,
-            targetLevel,
-            deadline,
-            overrideTaskCount: overrideInt
+          goal,
+          level: currentLevel,
+          deadline,
+          totalTasks: overrideTaskCount 
           })
         });
         const { tasks } = await resp.json();
