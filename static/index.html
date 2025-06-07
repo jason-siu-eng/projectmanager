@@ -332,48 +332,64 @@
       // ─── FullCalendar initialization using timeGridWeek ───────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
-  initialView: 'timeGridWeek',
+  initialView: 'dayGridWeek',
   headerToolbar: {
     left: 'prev,today,next',
     center: 'title',
-    right: 'timeGridWeek,timeGridDay'
+    right: 'dayGridWeek,dayGridDay'
   },
   editable: false,
   selectable: false,
 
-  // ★ Make each time‐slot row equal in height and fill the container:
-  expandRows: true,        // Forces all visible rows to have the same height
-  height: 'auto',          // Let the calendar size itself based on container width
+  eventDidMount(info) {
+    // grab the title element that FullCalendar just rendered
+    let titleEl = info.el.querySelector('.fc-event-title');
+    if (!titleEl) return;
 
-  // ★ Slot range and granularity:
-  slotMinTime: '06:00:00',
-  slotMaxTime: '20:00:00',
-  slotDuration: '01:00:00',
-  slotLabelInterval: '01:00:00',
+    // measure how much room you have vs how much text you have
+    const maxWidth = titleEl.offsetWidth;
+    const text    = titleEl.textContent.trim();
+
+    // start at your default font-size
+    let fontSize = 14; 
+    titleEl.style.fontSize = fontSize + 'px';
+
+    // if it overflows, keep reducing by 1px until it fits or floor at 8px
+    while ((titleEl.scrollWidth > maxWidth) && fontSize > 8) {
+      fontSize -= 1;
+      titleEl.style.fontSize = fontSize + 'px';
+    }
+  }
 });
 
-      calendar.render();
+calendar.render();
 
       // ─── Google Sync ────────────────────────────────
       const syncBtn    = document.getElementById('syncBtn');
       const syncStatus = document.getElementById('syncStatus');
       async function syncGoogleEvents() {
-        syncStatus.textContent = 'Syncing…';
-        try {
-          const resp = await fetch('/api/events', { credentials: 'include' });
-          if (resp.status === 401) {
-            window.location.href = '/login';
-            return;
-          }
-          const { events } = await resp.json();
-          calendar.removeAllEvents();
-          calendar.addEventSource(events);
-          syncStatus.textContent = 'Synced';
-        } catch (err) {
-          console.error('Sync error', err);
-          syncStatus.textContent = 'Sync failed';
-        }
-      }
+  syncStatus.textContent = 'Syncing…';
+  try {
+    const resp = await fetch('/api/events', { credentials: 'include' });
+    if (resp.status === 401) {
+      window.location.href = '/login';
+      return;
+    }
+    const { events } = await resp.json();
+
+    // 1) Remove every prior source (so we never double‐up)
+    calendar.getEventSources().forEach(src => src.remove());
+
+    // 2) Now add exactly one
+    calendar.addEventSource(events);
+
+    syncStatus.textContent = 'Synced';
+  } catch (err) {
+    console.error('Sync error', err);
+    syncStatus.textContent = 'Sync failed';
+  }
+}
+
       syncBtn.addEventListener('click', syncGoogleEvents);
 
       // ─── Helper: wire up "＋" and "－" to add/remove entire <li> rows ─────
