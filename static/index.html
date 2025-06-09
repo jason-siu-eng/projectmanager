@@ -15,15 +15,36 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
   <style>
-    /* 1. Box‐sizing so width:100% includes padding/border */
-    *, *::before, *::after { box-sizing: border-box; }
+    /* ==== TWO-COLUMN LAYOUT ==== */
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 2fr;  /* sidebar : calendar */
+      gap: 1.5rem;
+      align-items: start;
+    }
+    .sidebar {
+      /* keep your sidebar scrollable if it gets tall */
+      max-height: 100vh;
+      overflow-y: auto;
+      padding-right: 1rem;
+      border-right: 1px solid #eee;
+    }
+    .calendar-wrapper {
+      /* ensure calendar fills its column */
+      width: 100%;
+    }
+
+    /* 1. Box-sizing so width:100% includes padding/border */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
 
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
     }
 
-    /* 2. Center wrapper */
+    /* 2. Center wrapper for sidebar content */
     .container {
       max-width: 600px;
       margin: 0 auto;
@@ -79,7 +100,7 @@
       font-size: 1rem;
     }
 
-    /* 5. Task outline & Add‐to‐calendar button */
+    /* 5. Task outline & Add-to-calendar button */
     #outline {
       margin-top: 2rem;
     }
@@ -100,7 +121,7 @@
     /* 6. Calendar container */
     #calendar {
       margin-top: 2rem;
-      min-height: 700px; /* or whatever minimum you prefer */
+      min-height: 700px; /* ensure vertical space */
     }
 
     /* 7. FullCalendar button tweaks */
@@ -126,16 +147,14 @@
     #settingsModal {
       display: none;
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
       background: rgba(0,0,0,0.5);
       justify-content: center;
       align-items: center;
       z-index: 1000;
     }
-    /* 9. Settings modal content (solid white + border) */
+    /* 9. Settings modal content */
     #settingsModal .modal-content {
       background: white;
       padding: 1rem;
@@ -143,7 +162,7 @@
       max-width: 600px;
       width: 90%;
       position: relative;
-      border: 1px solid #000; /* black border */
+      border: 1px solid #000;
     }
     #settingsModal .close {
       position: absolute;
@@ -152,7 +171,7 @@
       font-size: 1.5rem;
       cursor: pointer;
     }
-    /* 10. New settings controls styling */
+    /* 10. Settings days checkboxes */
     #settingsModal .form-group.days {
       display: flex;
       flex-wrap: wrap;
@@ -165,64 +184,24 @@
       margin-bottom: 0;
     }
 
-    /* 11. Task header row styling for three columns */
+    /* 11. Task header row styling */
     .task-header {
       display: flex;
       align-items: center;
       margin-bottom: 0.5rem;
     }
-    .task-header .task-outline-header {
-      flex: 1;
-      font-size: 1rem;
-      font-weight: 600;
-      color: #333;
-    }
-    .task-header .duration-header {
-      width: 4.5rem;
-      text-align: left;
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: #333;
-      margin-left: 0.5rem;
-    }
-    .task-header .action-header {
-      width: 3rem;
-      text-align: left;
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: #333;
-      margin-left: 0.5rem;
-    }
+    .task-header .task-outline-header { flex: 1; font-size: 1rem; font-weight: 600; color: #333; }
+    .task-header .duration-header { width: 4.5rem; margin-left: 0.5rem; text-align: left; font-size: 0.9rem; font-weight: 600; color: #333; }
+    .task-header .action-header   { width: 3rem;   margin-left: 0.5rem; text-align: left; font-size: 0.9rem; font-weight: 600; color: #333; }
 
-    /* 12. Task list item styling */
-    .task-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-    .task-list li {
-      display: flex;
-      align-items: center;
-      margin-bottom: 0.5rem;
-    }
-    .task-number {
-      width: 1.5rem;
-      font-size: 1rem;
-      color: #333;
-    }
-    .task-input {
-      flex: 1;
-      padding: 0.5rem;
-      font-size: 1rem;
-    }
-    .task-duration {
-      width: 4.5rem;
-      margin-left: 0.5rem;
-      padding: 0.5rem;
-      font-size: 1rem;
-    }
+    /* 12. Task list items */
+    .task-list { list-style: none; padding: 0; margin: 0; }
+    .task-list li { display: flex; align-items: center; margin-bottom: 0.5rem; }
+    .task-number   { width: 1.5rem; font-size: 1rem; color: #333; }
+    .task-input    { flex: 1; padding: 0.5rem; font-size: 1rem; }
+    .task-duration { width: 4.5rem; margin-left: 0.5rem; padding: 0.5rem; font-size: 1rem; }
     .task-plus,
-    .task-minus {
+    .task-minus   {
       display: inline-block;
       width: 1rem;
       margin-left: 0.5rem;
@@ -230,71 +209,71 @@
       font-size: 1.2rem;
       user-select: none;
     }
-    .task-plus {
-      color: blue;
-    }
-    .task-minus {
-      color: red;
-    }
+    .task-plus  { color: blue; }
+    .task-minus { color: red; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>Task Scheduler</h1>
-      <div class="header-controls">
-        <!-- Settings gear -->
-        <button id="settingsBtn" title="Settings">
-          <span class="material-icons">settings</span>
-        </button>
-        <!-- Google Sync -->
-        <div class="sync">
-          <button id="syncBtn" title="Sync Google">
-            <img
-              src="https://developers.google.com/identity/images/g-logo.png"
-              alt="Sync"
-            />
-          </button>
-          <span id="syncStatus">Not synced</span>
+  <div class="layout">
+    <!-- LEFT COLUMN -->
+    <div class="sidebar">
+      <div class="container">
+        <div class="header">
+          <h1>Task Scheduler</h1>
+          <div class="header-controls">
+            <button id="settingsBtn" title="Settings">
+              <span class="material-icons">settings</span>
+            </button>
+            <div class="sync">
+              <button id="syncBtn" title="Sync Google">
+                <img src="https://developers.google.com/identity/images/g-logo.png" alt="Sync" />
+              </button>
+              <span id="syncStatus">Not synced</span>
+            </div>
+          </div>
         </div>
+
+        <form id="goalForm">
+          <div class="form-group">
+            <label for="goalInput">What is your goal?</label>
+            <input type="text" id="goalInput" required/>
+          </div>
+          <div class="form-group">
+            <label for="currentLevel">Current Proficiency Level</label>
+            <select id="currentLevel">
+              <option value="beginner">Beginner</option>
+              <option value="intermediate" selected>Intermediate</option>
+              <option value="expert">Expert</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="targetLevel">Desired Proficiency Level</label>
+            <select id="targetLevel">
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="expert" selected>Expert</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="deadlineInput">Deadline (YYYY-MM-DD)</label>
+            <input type="date" id="deadlineInput" required/>
+          </div>
+          <div class="form-group">
+            <label for="overrideTaskCount">Total steps (optional)</label>
+            <input type="number" id="overrideTaskCount" min="1" placeholder="e.g. 8" />
+          </div>
+          <button type="submit">Generate Tasks</button>
+        </form>
+
+        <div id="outline"></div>
+        <button id="addCalendarBtn">Add to Calendar</button>
       </div>
     </div>
 
-    <form id="goalForm">
-      <div class="form-group">
-        <label for="goalInput">What is your goal?</label>
-        <input type="text" id="goalInput" required/>
-      </div>
-      <div class="form-group">
-        <label for="currentLevel">Current Proficiency Level</label>
-        <select id="currentLevel">
-          <option value="beginner">Beginner</option>
-          <option value="intermediate" selected>Intermediate</option>
-          <option value="expert">Expert</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="targetLevel">Desired Proficiency Level</label>
-        <select id="targetLevel">
-          <option value="beginner">Beginner</option>
-          <option value="intermediate">Intermediate</option>
-          <option value="expert" selected>Expert</option>
-        </select>
-      </div>      
-      <div class="form-group">
-        <label for="deadlineInput">Deadline (YYYY-MM-DD)</label>
-        <input type="date" id="deadlineInput" required/>
-      </div>
-      <div class="form-group">
-        <label for="overrideTaskCount">Total steps (optional)</label>
-        <input type="number" id="overrideTaskCount" min="1" placeholder="e.g. 8" />
-      </div>
-      <button type="submit">Generate Tasks</button>
-    </form>
-
-    <div id="outline"></div>
-    <button id="addCalendarBtn">Add to Calendar</button>
-    <div id="calendar"></div>
+    <!-- RIGHT COLUMN -->
+    <div class="calendar-wrapper">
+      <div id="calendar"></div>
+    </div>
   </div>
 
   <!-- Settings Modal -->
@@ -302,12 +281,10 @@
     <div class="modal-content">
       <span class="close" id="closeSettings">&times;</span>
       <h2>Settings</h2>
-      <!-- Max hours per day -->
       <div class="form-group">
         <label for="maxHoursPerDay">Max hours/day</label>
-        <input type="number" id="maxHoursPerDay" min="1" value="2"/>
+        <input type="number" id="maxHoursPerDay" min="1" value="8"/>
       </div>
-      <!-- Allowed days of week -->
       <div class="form-group days">
         <label><input type="checkbox" value="MO" checked/> Mon</label>
         <label><input type="checkbox" value="TU" checked/> Tue</label>
@@ -321,242 +298,209 @@
     </div>
   </div>
 
-  <!-- FullCalendar JS (includes timeGrid plugin) -->
+  <!-- FullCalendar JS (includes timeGrid) -->
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // ─── FullCalendar initialization using timeGridWeek ───────────────
+      // ─── Calendar init ─────────────────────────────────
       const calendarEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'timeGridWeek',
-        headerToolbar: {
-          left: 'prev,today,next',
-          center: 'title',
-          right: 'timeGridWeek,timeGridDay'
-        },
-        slotMinTime: '06:00:00',
-        slotMaxTime: '20:00:00',
-        allDaySlot: true,   // preserve your all-day row
-        selectable: false,
-        editable: false,
+  // 1️⃣ switch to timeGridWeek:
+  initialView: 'timeGridWeek',
 
-        eventDidMount(info) {
-          // dynamically shrink long titles
-          const titleEl = info.el.querySelector('.fc-event-title');
+  // 2️⃣ keep your same toolbar:
+  headerToolbar: {
+    left:  'prev,today,next',
+    center:'title',
+    right: 'timeGridWeek,timeGridDay'
+  },
+
+  // 3️⃣ show the all-day slot you had
+  allDaySlot: true,
+
+  // 4️⃣ restrict the vertical span to your WORK hours:
+  slotMinTime: '06:00:00',
+  slotMaxTime: '18:00:00',
+
+  // 5️⃣ leave everything else untouched:
+  editable: false,
+  selectable: false,
+
+  eventDidMount(info) {
+          // auto‐shrink title font to fit
+          let titleEl = info.el.querySelector('.fc-event-title');
           if (!titleEl) return;
-          let fs = 14; 
-          titleEl.style.fontSize = fs + 'px';
-          const maxW = titleEl.offsetWidth;
+          let maxW = titleEl.offsetWidth, txt = titleEl.textContent;
+          let fs = 14; titleEl.style.fontSize = fs+'px';
           while (titleEl.scrollWidth > maxW && fs > 8) {
-            fs -= 1;
-            titleEl.style.fontSize = fs + 'px';
+            titleEl.style.fontSize = (--fs)+'px';
           }
         }
       });
       calendar.render();
 
-      // ─── Google Sync ────────────────────────────────
+      // ─── Sync Google events ──────────────────────────────
       const syncBtn    = document.getElementById('syncBtn');
       const syncStatus = document.getElementById('syncStatus');
       async function syncGoogleEvents() {
         syncStatus.textContent = 'Syncing…';
         try {
           const resp = await fetch('/api/events', { credentials: 'include' });
-          if (resp.status === 401) {
-            window.location.href = '/login';
-            return;
-          }
+          if (resp.status === 401) return window.location.href = '/login';
           const { events } = await resp.json();
-          calendar.getEventSources().forEach(src => src.remove());
+          calendar.getEventSources().forEach(s=>s.remove());
           calendar.addEventSource(events);
           syncStatus.textContent = 'Synced';
-        } catch (err) {
-          console.error('Sync error', err);
+        } catch {
           syncStatus.textContent = 'Sync failed';
         }
       }
       syncBtn.addEventListener('click', syncGoogleEvents);
 
-      // ─── Helper: wire up "＋"/"－" to add/remove whole rows ─────
+      // ─── Add/Remove task rows («＋»/«−») ──────────────────
       function wireUpAddRemoveButtons() {
-        document.querySelectorAll('.task-plus').forEach(btn => {
-          btn.onclick = () => {
-            const li = btn.closest('li');
-            const ol = li.parentElement;
-            const items = Array.from(ol.children);
-            const idx = items.indexOf(li);
+        document.querySelectorAll('.task-plus').forEach(btn=>{
+          btn.onclick = ()=>{
+            const li = btn.closest('li'), ol = li.parentElement;
+            const all = Array.from(ol.querySelectorAll('li'));
+            const idx = all.indexOf(li);
             const newLi = document.createElement('li');
             newLi.innerHTML = `
               <div class="task-number">0.</div>
               <input type="text" class="task-input" placeholder="New task…" />
               <input type="number" class="task-duration" value="1" min="0.5" step="0.5" />
               <span class="task-plus">＋</span>
-              <span class="task-minus">－</span>
+              <span class="task-minus">−</span>
             `;
-            ol.insertBefore(newLi, items[idx+1]||null);
-            renumberAndWire();
+            ol.insertBefore(newLi, all[idx+1]||null);
+            Array.from(ol.querySelectorAll('li')).forEach((li2,i)=>li2.querySelector('.task-number').textContent=(i+1)+'.');
+            wireUpAddRemoveButtons();
           };
         });
-        document.querySelectorAll('.task-minus').forEach(btn => {
-          btn.onclick = () => {
-            const li = btn.closest('li');
-            const ol = li.parentElement;
-            if (ol.children.length > 1) li.remove();
-            renumberAndWire();
+        document.querySelectorAll('.task-minus').forEach(btn=>{
+          btn.onclick = ()=>{
+            const li = btn.closest('li'), ol = li.parentElement;
+            if (ol.querySelectorAll('li').length > 1) {
+              li.remove();
+              Array.from(ol.querySelectorAll('li')).forEach((li2,i)=>li2.querySelector('.task-number').textContent=(i+1)+'.');
+            }
+            wireUpAddRemoveButtons();
           };
         });
-      }
-      function renumberAndWire() {
-        document.querySelectorAll('.task-list li').forEach((li,i)=>{
-          li.querySelector('.task-number').textContent = (i+1) + '.';
-        });
-        wireUpAddRemoveButtons();
       }
 
-      // ─── Task Generation ────────────────────────────
+      // ─── Task generation ────────────────────────────────
       const form       = document.getElementById('goalForm');
       const outlineDiv = document.getElementById('outline');
       const addBtn     = document.getElementById('addCalendarBtn');
-      let lastTasks    = [];
-      let lastDeadline = '';
+      let lastTasks    = [], lastDeadline = '';
 
-      form.addEventListener('submit', async e => {
+      form.addEventListener('submit', async e=>{
         e.preventDefault();
         outlineDiv.innerHTML = '<p>Loading tasks…</p>';
         addBtn.style.display = 'none';
-
-        const goal            = document.getElementById('goalInput').value;
-        const currentLevel    = document.getElementById('currentLevel').value;
-        const targetLevel     = document.getElementById('targetLevel').value;
-        const deadline        = document.getElementById('deadlineInput').value;
-        const overrideStr     = document.getElementById('overrideTaskCount').value;
-        const overrideInt     = overrideStr ? parseInt(overrideStr, 10) : undefined;
+        const goal         = document.getElementById('goalInput').value;
+        const currentLevel = document.getElementById('currentLevel').value;
+        const targetLevel  = document.getElementById('targetLevel').value;
+        const deadline     = document.getElementById('deadlineInput').value;
+        const overrideInt  = parseInt(document.getElementById('overrideTaskCount').value) || null;
         lastDeadline = deadline;
-
-        const resp = await fetch('/api/tasks', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            goal,
-            current_level: currentLevel,
-            target_level: targetLevel,
-            deadline,
-            override: overrideInt
-          })
+        const resp = await fetch('/api/tasks',{
+          method:'POST',credentials:'include',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ goal, currentLevel, targetLevel, deadline, overrideTaskCount: overrideInt })
         });
-        const { tasks } = await resp.json();
-        lastTasks = tasks || [];
+        const { tasks=[] } = await resp.json();
+        lastTasks = tasks;
 
         outlineDiv.innerHTML = '';
-        // header row
-        const hdr = document.createElement('div');
-        hdr.className = 'task-header';
-        hdr.innerHTML = `
+        const headerRow = document.createElement('div');
+        headerRow.className = 'task-header';
+        headerRow.innerHTML = `
           <div class="task-outline-header">Task Outline</div>
           <div class="duration-header">Duration (hr)</div>
           <div class="action-header">Add Task</div>
         `;
-        outlineDiv.appendChild(hdr);
+        outlineDiv.appendChild(headerRow);
 
-        // list
         const ol = document.createElement('ol');
         ol.className = 'task-list';
-        lastTasks.forEach((t, idx) => {
+        tasks.forEach((t,i)=>{
           const li = document.createElement('li');
           li.innerHTML = `
-            <div class="task-number">${idx+1}.</div>
+            <div class="task-number">${i+1}.</div>
             <input type="text" class="task-input" value="${t.task.replace(/"/g,'&quot;')}" />
             <input type="number" class="task-duration" value="${t.duration_hours||1}" min="0.5" step="0.5" />
             <span class="task-plus">＋</span>
-            <span class="task-minus">－</span>
+            <span class="task-minus">−</span>
           `;
           ol.appendChild(li);
         });
         outlineDiv.appendChild(ol);
-        renumberAndWire();
-
+        wireUpAddRemoveButtons();
         addBtn.style.display = 'block';
       });
 
-      // ─── Add to Calendar ─────────────────────────
-      addBtn.addEventListener('click', async () => {
-  addBtn.disabled    = true;
-  addBtn.textContent = 'Adding…';
-
-  // 1) Push to your backend
-  const resp = await fetch('/api/schedule', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tasks:            lastTasks,
-      start_date:       new Date().toISOString(),
-      deadline:         lastDeadline,
-      settings: {
-        maxHoursPerDay:     parseInt(localStorage.getItem('maxHoursPerDay')||'2', 10),
-        allowedDaysOfWeek:  JSON.parse(localStorage.getItem('allowedDays')||'[]')
-      }
-    })
-  });
-  const data = await resp.json();
-
-  if (!resp.ok) {
-    alert("Error scheduling tasks: " + (data.message || data.error));
-  } else {
-    // 2) Directly overlay *only* your newly scheduled events in BRIGHT RED
-    if (data.scheduled?.length) {
-      data.scheduled.forEach(ev => {
-        calendar.addEvent({
-          title:     ev.summary,
-          start:     ev.start,
-          end:       ev.end,
-          color:     '#ff0000',  // bright red background & border
-          textColor: '#ffffff'   // white text
+      // ─── Add to Calendar ──────────────────────────────
+      addBtn.addEventListener('click', async ()=>{
+        addBtn.disabled = true; addBtn.textContent = 'Adding…';
+        const resp = await fetch('/api/schedule',{
+          method:'POST',credentials:'include',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            tasks: lastTasks,
+            start_date: new Date().toISOString(),
+            deadline: lastDeadline,
+            settings:{
+              maxHoursPerDay:   parseInt(localStorage.getItem('maxHoursPerDay')||'8',10),
+              allowedDaysOfWeek:JSON.parse(localStorage.getItem('allowedDays')||'[]')
+            }
+          })
         });
+        const data = await resp.json();
+        if (!resp.ok) {
+          alert('Error scheduling tasks:'+ (data.message||data.error));
+          return addBtn.disabled=false, addBtn.textContent='Add to Calendar';
+        }
+        await syncGoogleEvents();
+        (data.scheduled||[]).forEach(ev=>{
+          calendar.addEvent({
+            title: ev.summary,
+            start: ev.start,
+            end:   ev.end,
+            color: '#ff0000',    // bright red
+            textColor: '#fff'
+          });
+        });
+        addBtn.textContent = 'Done!';
+        setTimeout(()=>{
+          addBtn.style.display='none';
+          addBtn.disabled=false;
+          addBtn.textContent='Add to Calendar';
+        },1500);
       });
-    }
-    // (if you want to pull in any other Google-created events, user can hit Sync)
-  }
 
-  addBtn.textContent = 'Done!';
-  setTimeout(() => {
-    addBtn.style.display  = 'none';
-    addBtn.disabled       = false;
-    addBtn.textContent    = 'Add to Calendar';
-  }, 1500);
-});
-
-      // ─── Settings Popup ────────────────────────────
+      // ─── Settings Popup ───────────────────────────────
       const settingsBtn   = document.getElementById('settingsBtn');
       const settingsModal = document.getElementById('settingsModal');
       const closeSettings = document.getElementById('closeSettings');
       const saveSettings  = document.getElementById('saveSettings');
-
-      settingsBtn.onclick = () => settingsModal.style.display = 'flex';
-      closeSettings.onclick = () => settingsModal.style.display = 'none';
-      window.onclick = e => { if (e.target === settingsModal) settingsModal.style.display = 'none'; };
-
-      saveSettings.onclick = () => {
-        const maxHrs = parseInt(document.getElementById('maxHoursPerDay').value,10);
-        const days   = Array.from(
-          document.querySelectorAll('#settingsModal .form-group.days input:checked')
-        ).map(cb=>cb.value);
-
-        localStorage.setItem('maxHoursPerDay', maxHrs);
-        localStorage.setItem('allowedDays',   JSON.stringify(days));
-        settingsModal.style.display = 'none';
+      settingsBtn.onclick = ()=>settingsModal.style.display='flex';
+      closeSettings.onclick = ()=>settingsModal.style.display='none';
+      window.addEventListener('click',e=>{ if(e.target===settingsModal) settingsModal.style.display='none'; });
+      saveSettings.onclick = ()=>{
+        localStorage.setItem('maxHoursPerDay', document.getElementById('maxHoursPerDay').value);
+        const days = Array.from(document.querySelectorAll('#settingsModal .form-group.days input:checked'))
+                          .map(cb=>cb.value);
+        localStorage.setItem('allowedDays', JSON.stringify(days));
+        settingsModal.style.display='none';
       };
-
       // load saved settings
-      const storedMax = localStorage.getItem('maxHoursPerDay');
-      if (storedMax) document.getElementById('maxHoursPerDay').value = storedMax;
-      const storedDays = JSON.parse(localStorage.getItem('allowedDays')||'[]');
-      if (storedDays.length) {
-        document.querySelectorAll('#settingsModal .form-group.days input')
-          .forEach(cb => cb.checked = storedDays.includes(cb.value));
-      }
+      const sm = localStorage.getItem('maxHoursPerDay');
+      if (sm) document.getElementById('maxHoursPerDay').value = sm;
+      const sd = JSON.parse(localStorage.getItem('allowedDays')||'[]');
+      if (sd.length) Array.from(document.querySelectorAll('#settingsModal .form-group.days input'))
+                         .forEach(cb=>cb.checked = sd.includes(cb.value));
     });
   </script>
 </body>
